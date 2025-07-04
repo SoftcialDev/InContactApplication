@@ -1,0 +1,130 @@
+// 1. Datasource & Generator
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "windows"]
+  engineType    = "binary"
+}
+
+// 2. Enumerations
+
+enum UserRole {
+  Supervisor  // users with highest privileges
+  Admin       // managers or intermediate-level admins
+  Employee    // standard users who stream video
+}
+
+enum Status {
+  online      // user is connected and ready
+  offline     // user is not connected
+}
+
+enum CommandType {
+  START       // begin streaming session
+  STOP        // end streaming session
+}
+
+// 3. Models
+
+model User {
+  id              String            @id @default(uuid()) @db.Uuid
+  azureAdObjectId String            @unique
+  email           String            @unique
+  fullName        String
+  role            UserRole
+  roleChangedAt   DateTime?         // timestamp when the role was last updated
+  supervisorId    String?           @db.Uuid
+  assignedAt      DateTime?
+
+  supervisor      User?             @relation("SupervisorToEmployees", fields: [supervisorId], references: [id], onDelete: Cascade)
+  employees       User[]            @relation("SupervisorToEmployees")
+
+  presence        Presence?
+  presenceHistory PresenceHistory[]
+  commands        PendingCommand[]  @relation("EmployeeCommands")
+
+  streamingSessions StreamingSessionHistory[]
+  auditLogs         AuditLog[]       @relation("UserAuditLogs")
+
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  deletedAt       DateTime?
+
+  @@index([supervisorId])
+}
+
+model Presence {
+  userId     String   @id @db.Uuid
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  status     Status
+  lastSeenAt DateTime
+  updatedAt  DateTime @updatedAt
+
+  @@index([status])
+}
+
+model PresenceHistory {
+  id             String   @id @default(uuid()) @db.Uuid
+  userId         String   @db.Uuid
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  connectedAt    DateTime @default(now())
+  disconnectedAt DateTime?
+  updatedAt      DateTime @updatedAt
+
+  @@index([userId])
+  @@index([connectedAt])
+}
+
+model PendingCommand {
+  id              String      @id @default(uuid()) @db.Uuid
+  employeeId      String      @db.Uuid
+  employee        User        @relation("EmployeeCommands", fields: [employeeId], references: [id], onDelete: Cascade)
+  command         CommandType
+  timestamp       DateTime
+  published       Boolean     @default(false)
+  publishedAt     DateTime?
+  acknowledged    Boolean     @default(false)
+  acknowledgedAt  DateTime?
+  attemptCount    Int         @default(0)
+  expiresAt       DateTime?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  @@index([employeeId, acknowledged])
+  @@index([expiresAt])
+}
+
+model StreamingSessionHistory {
+  id            String    @id @default(uuid()) @db.Uuid
+  userId        String    @db.Uuid
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  startedAt     DateTime  @default(now())
+  stoppedAt     DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([userId])
+  @@index([startedAt])
+}
+
+/// 5. Auditoría de cambios
+model AuditLog {
+  id           String   @id @default(uuid()) @db.Uuid
+  entity       String
+  entityId     String
+  action       String
+  changedById  String   @db.Uuid
+  changedBy    User     @relation("UserAuditLogs", fields: [changedById], references: [id], onDelete: Cascade)
+  timestamp    DateTime @default(now())
+  dataBefore   Json?
+  dataAfter    Json?
+
+  @@index([entity, entityId])
+  @@index([changedById])
+  @@index([timestamp])
+}

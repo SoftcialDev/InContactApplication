@@ -1,0 +1,25 @@
+{
+  "version": "2.0",
+  "extensionBundle": {
+    "id": "Microsoft.Azure.Functions.ExtensionBundle",
+    "version": "[3.3.0,4.0.0)" 
+  },
+  "extensions": {
+    "webPubSub": {
+      "version": "1.0.0",
+      "connectionStringSetting": "WEBPUBSUB_CONNECTION",
+      "pathPrefix": "runtime/webhooks/webpubsub"
+    }
+  },
+  "logging": {
+    "applicationInsights": {
+      "samplingSettings": { "isEnabled": false }
+    },
+    "logLevel": {
+      "default": "Information",
+      "Host.Results": "Trace",
+      "Host.Aggregator": "Trace",
+      "Function.*": "Trace"
+    }
+  }
+}
