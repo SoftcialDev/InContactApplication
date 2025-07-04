@@ -251,3 +251,21 @@ resource "azuread_application_password" "api_app_secret" {
   application_id = azuread_application.api_app.id
   display_name   = "client-secret-for-Graph-calls"
 }
+
+data "azurerm_subscription" "current" {}
+
+
+resource "azuread_application_federated_identity_credential" "github_oidc" {
+  application_id = azuread_application.api_app.id
+  display_name   = "github-actions-main-oidc"
+
+  issuer    = "https://token.actions.githubusercontent.com"
+  subject   = "repo:SoftcialDev/InContactApplication:ref:refs/heads/main"
+  audiences = ["api://AzureADTokenExchange"]
+}
+
+resource "azurerm_role_assignment" "github_oidc_contributor" {
+  scope                = data.azurerm_subscription.current.id
+  role_definition_name = "Contributor"
+  principal_id         = azuread_service_principal.api_sp.object_id
+}

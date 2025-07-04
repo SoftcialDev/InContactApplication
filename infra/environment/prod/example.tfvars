@@ -73,7 +73,7 @@ aad_logout_uris                = [
 ]
 
 
-
+github_repo = "your github repo, Example:SoftcialDev/InContactApplication"
 # Emails of users to assign the Admin role.
 aad_admins_group_members       = ["marco.vargas@collettehealth.com"]
 

@@ -102,7 +102,9 @@ jobs:
             Write-Error "❌ deploy.zip not found"
             Exit 1
           }
-          Write-Output "::set-output name=path::$zip"
+     
+          "path=$zip" | Out-File -FilePath $Env:GITHUB_OUTPUT -Encoding utf8 -Append
+
 
       - name: Login to Azure (Service Principal)
         uses: azure/login@v2

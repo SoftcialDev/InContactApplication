@@ -14,6 +14,17 @@ variable "region" {
   default     = "eastus"
 }
 
+variable "github_repo" {
+  description = "GitHub repo for OIDC: format ORG/REPO"
+  type        = string
+}
+
+variable "github_branch" {
+  description = "Branch name to trust for OIDC"
+  type        = string
+  default     = "main"
+}
+
 variable "aad_desktop_redirect_uris" {
   description = "List of redirect URIs for the SPA (e.g., http://localhost:5173, https://prod-domain/.../auth)"
   type        = list(string)

@@ -41,3 +41,15 @@ variable "aad_supervisors_group_members" {
   type        = list(string)
   default     = []
 }
+
+
+variable "github_repo" {
+  description = "GitHub repo for OIDC: format ORG/REPO"
+  type        = string
+}
+
+variable "github_branch" {
+  description = "Branch name to trust for OIDC"
+  type        = string
+  default     = "main"
+}

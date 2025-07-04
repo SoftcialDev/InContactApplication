@@ -99,6 +99,7 @@ module "aad_spa" {
   aad_admins_group_members      = var.aad_admins_group_members
   aad_supervisors_group_members = var.aad_admins_group_members
   aad_desktop_redirect_uris = var.aad_desktop_redirect_uris
+ github_repo                 =               var.github_repo
 }
 
 # 7. AKS cluster module
@@ -154,6 +155,7 @@ module "function_app" {
   name_prefix             = var.name_prefix
   resource_group_name     = azurerm_resource_group.main-rg.name
   location                = var.region
+  
 
   # Link to the Storage Account for function code and state
   storage_account_name           = module.storage.storage_account_name
