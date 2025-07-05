@@ -117,6 +117,6 @@ jobs:
         shell: pwsh
         run: |
           az functionapp deployment source config-zip `
-            --resource-group livekit-agent-azure `
-            --name livekit-agent-azure-func `
+            --resource-group in-contact-app `
+            --name in-contact-app-func `
             --src "${{ steps.findzip.outputs.path }}"
