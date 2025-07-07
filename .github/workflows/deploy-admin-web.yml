@@ -24,7 +24,7 @@ jobs:
     # Environment variables for the Vite build
     env:
       # Azure AD integration values injected at build time
-      VITE_AZURE_AD_CLIENT_ID:                ${{ secrets.AZURE_AD_CLIENT_ID }}
+      VITE_AZURE_AD_CLIENT_ID:                ${{ secrets.VITE_AZURE_AD_CLIENT_ID }}
       VITE_AZURE_AD_TENANT_ID:                ${{ secrets.AZURE_AD_TENANT_ID }}
       VITE_AZURE_AD_REDIRECT_URI:             ${{ secrets.VITE_AZURE_AD_REDIRECT_URI }}
       VITE_AZURE_AD_POST_LOGOUT_REDIRECT_URI: ${{ secrets.VITE_AZURE_AD_POST_LOGOUT_REDIRECT_URI }}
