@@ -176,7 +176,7 @@ spec:
         - livekit2.xyzhub.pw
       secretName: livekit-tls
   rules:
-    - host: livekit.xyzhub.pw
+    - host: livekit2.xyzhub.pw
       http:
         paths:
           - path: /
