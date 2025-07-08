@@ -45,3 +45,9 @@ kubeconfig.yaml
 dist/
 node_modules/
 apps/api-functions/local.settings.json
+apps/electron/daemon/incontactservice.xml
+apps/electron/daemon/incontactservice.out.log
+apps/electron/daemon/incontactservice.exe.config
+apps/electron/daemon/incontactservice.err.log
+apps/electron/daemon/incontactservice.wrapper.log
+apps/electron/daemon/incontactservice.exe

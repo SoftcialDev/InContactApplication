@@ -1,7 +1,8 @@
 import React from 'react';
 import { useStreamingDashboard } from '../hooks/useCamara';
 
-const DashboardPage: React.FC = () => {
+
+const PsoDashboard: React.FC = () => {
   const { videoRef, audioRef, isStreaming } = useStreamingDashboard();
 
   return (
@@ -29,4 +30,4 @@ const DashboardPage: React.FC = () => {
   );
 };
 
-export default DashboardPage;
+export default PsoDashboard;

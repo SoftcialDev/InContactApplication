@@ -1,7 +1,7 @@
 import React, { useEffect } from "react";
 import { Outlet } from "react-router-dom";
 import Sidebar from "../features/navigation/components/Sidebar";
-import Header from "./Header";
+import Header from "../components/Header";
 import { HeaderProvider } from "../context/HeaderContext";
 import { useAuth } from "../features/auth/hooks/useAuth";
 import { usePresenceStore } from "../stores/usePresenceStore";
