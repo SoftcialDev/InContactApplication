@@ -12,8 +12,10 @@
   },
   "dependencies": {
     "@azure/functions": "^3.0.0",
+    "@azure/identity": "^4.10.2",
     "@azure/service-bus": "^7.0.0",
     "@azure/web-pubsub": "^1.2.0",
+    "@microsoft/microsoft-graph-client": "^3.0.7",
     "@prisma/client": "^6.10.1",
     "axios": "^1.0.0",
     "jsonwebtoken": "^8.5.1",
@@ -25,6 +27,7 @@
   },
   "devDependencies": {
     "@types/jsonwebtoken": "^9.0.10",
+    "@types/microsoft-graph": "^2.40.1",
     "@types/qs": "^6.14.0",
     "copyfiles": "^2.4.1",
     "cpx": "^1.5.0",

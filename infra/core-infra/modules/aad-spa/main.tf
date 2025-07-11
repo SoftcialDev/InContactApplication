@@ -28,6 +28,20 @@ locals {
     "User.ReadWrite.All",
     "Directory.Read.All",
     "Directory.ReadWrite.All",
+    "Chat.Create",
+    "Chat.Read.All",
+    "Chat.ReadBasic.All",
+    "Chat.ReadWrite.All",
+    "ChatMember.Read.All",
+    "ChatMember.ReadWrite.All",
+    "Chat.Read",
+    "Chat.ReadBasic",
+    "Chat.ReadWrite",
+    "Chat.ReadWrite.All",
+    "ChatMember.Read",
+    "ChatMember.ReadWrite",
+    "ChatMessage.Read",
+    "ChatMessage.Send"
   ]
   # Map each permission name to its role-ID GUID
   graph_app_role_map = {
@@ -37,6 +51,17 @@ locals {
     "User.ReadWrite.All"      = "741f803b-c850-494e-b5df-cde7c675a1ca"
     "Directory.Read.All"      = "7ab1d382-f21e-4acd-a863-ba3e13f7da61"
     "Directory.ReadWrite.All" = "19dbc75e-c2e2-444c-a770-ec69d8559fc7"
+    "ChatMember.ReadWrite.All" = "d9c48af6-9ad9-47ad-82c3-63757137b9af"
+    "ChatMember.Read.All"     = "a3410be2-8e48-4f32-8454-c29a7465209d"
+    "Chat.ReadWrite.All"      = "294ce7c9-31ba-490a-ad7d-97a7d075e4ed"
+    "Chat.ReadBasic.All"      =  "b2e060da-3baf-4687-9611-f4ebc0f0cbde"
+    "Chat.Read.All"           =  "6b7d71aa-70aa-4810-a8d9-5d9fb2830017"
+    "Chat.Create"             =  "d9c48af6-9ad9-47ad-82c3-63757137b9af"
+    "Chat.Read" = "f501c180-9344-439a-bca0-6cbf209fd270"
+    "Chat.ReadBasic" = "9547fcb5-d03f-419d-9948-5928bbf71b0f"
+    "Chat.ReadWrite" = "9ff7295e-131b-4d94-90e1-69fde507ac11"
+    "ChatMember.Read" = "c5a9e2b1-faf6-41d4-8875-d381aa549b24"
+    "ChatMember.ReadWrite"  = "dea13482-7ea6-488f-8b98-eb5bbecf033d"
   }
   # Build a list of GUIDs for the app-only permissions
   graph_app_role_ids = [
@@ -52,12 +77,37 @@ locals {
     "User.Read.All",
     "User.ReadWrite.All",
     "Group.Read.All",
+    "Chat.Create",
+    "Chat.Read.All",
+    "Chat.ReadBasic.All",
+    "Chat.ReadWrite.All",
+    "ChatMember.Read.All",
+    "ChatMember.ReadWrite.All",
+    "Chat.Read",
+    "Chat.ReadBasic",
+    "Chat.ReadWrite",
+    "Chat.ReadWrite.All",
+    "ChatMember.Read",
+    "ChatMember.ReadWrite",
+    "ChatMessage.Read",
+    "ChatMessage.Send"
   ]
   graph_delegated_scope_map = {
     "Group.Read.All"      = "7ab1d382-f21e-4acd-a863-ba3e13f7da61"
     "Group.ReadWrite.All" = "62a82d76-70ea-41e2-9197-370581804d09"
     "User.Read.All"       = "df021288-bdef-4463-88db-98f22de89214"
     "User.ReadWrite.All"  = "741f803b-c850-494e-b5df-cde7c675a1ca"
+    "ChatMember.ReadWrite.All" = "d9c48af6-9ad9-47ad-82c3-63757137b9af"
+    "ChatMember.Read.All"     = "a3410be2-8e48-4f32-8454-c29a7465209d"
+    "Chat.ReadWrite.All"      = "7e9a077b-3711-42b9-b7cb-5fa5f3f7fea7"
+    "Chat.ReadBasic.All"      =  "b2e060da-3baf-4687-9611-f4ebc0f0cbde"
+    "Chat.Read.All"           =  "6b7d71aa-70aa-4810-a8d9-5d9fb2830017"
+    "Chat.Create"             =  "d9c48af6-9ad9-47ad-82c3-63757137b9af"
+    "Chat.Read" = "f501c180-9344-439a-bca0-6cbf209fd270"
+    "Chat.ReadBasic" = "9547fcb5-d03f-419d-9948-5928bbf71b0f"
+    "Chat.ReadWrite" = "9ff7295e-131b-4d94-90e1-69fde507ac11"
+    "ChatMember.Read" = "c5a9e2b1-faf6-41d4-8875-d381aa549b24"
+    "ChatMember.ReadWrite"  = "dea13482-7ea6-488f-8b98-eb5bbecf033d"
   }
   # Build a list of GUIDs for the delegated scopes
   graph_delegated_scope_ids = [
