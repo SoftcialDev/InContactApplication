@@ -57,6 +57,28 @@ export interface UserByRole {
   /** (Optional) Display name of assigned supervisor */
   supervisorName?: string;
 }
+/**
+ * Supervisor user record returned by GetSupervisorByIdentifier.
+ */
+export interface Supervisor {
+  /** Prisma User.id (UUID) */
+  id: string;
+  /** Azure AD object ID */
+  azureAdObjectId: string;
+  /** User’s email/UPN */
+  email: string;
+  /** User’s full display name */
+  fullName: string;
+}
+
+/**
+ * Response from GetSupervisorByIdentifier.
+ * - If a supervisor is assigned, `supervisor` will be present.
+ * - If no supervisor is assigned, `message` will be present.
+ */
+export type GetSupervisorResponse =
+  | { supervisor: Supervisor }
+  | { message: string };
 
 /**
  * Standard paged response wrapper.
@@ -209,4 +231,102 @@ export async function changeSupervisor(
 export async function getMyPsos(): Promise<string[]> {
   const response = await apiClient.get<{ psos: string[] }>('/api/GetPsosBySupervisor');
   return response.data.psos;
+}
+
+
+/**
+ * Fetches the supervisor for a given PSO identifier.
+ *
+ * @param identifier
+ *   The PSO’s identifier, which may be:
+ *   - their User.id (UUID)
+ *   - their Azure AD object ID (UUID)
+ *   - their email address (UPN)
+ *
+ * @returns Promise resolving to a `GetSupervisorResponse`.
+ *
+ * @example
+ * ```ts
+ * // by email
+ * const result = await getSupervisorByIdentifier("alice.employee@contoso.com");
+ *
+ * if ("supervisor" in result) {
+ *   console.log("Supervisor is", result.supervisor.fullName);
+ * } else {
+ *   console.log(result.message); // e.g. "No supervisor assigned"
+ * }
+ * ```
+ */
+export async function getSupervisorByIdentifier(
+  identifier: string
+): Promise<GetSupervisorResponse> {
+  const res = await apiClient.get<GetSupervisorResponse>(
+    `/api/GetSupervisorByIdentifier?identifier=${encodeURIComponent(identifier)}`
+  );
+  return res.data;
+}
+
+/**
+ * Fetches the supervisor for a given PSO identifier (ID, Azure OID or email)
+ * via the Function App endpoint GetSupervisorForPso.
+ *
+ * @param identifier
+ *   The PSO’s identifier, which may be:
+ *   - their User.id (UUID)
+ *   - their Azure AD object ID (UUID)
+ *   - their email address (UPN)
+ *
+ * @returns Promise resolving to a `GetSupervisorResponse`.
+ *
+ * @example
+ * ```ts
+ * const result = await getSupervisorForPso("alice.employee@contoso.com");
+ * if ("supervisor" in result) {
+ *   console.log("Supervisor is", result.supervisor.fullName);
+ * } else {
+ *   console.log(result.message); // e.g. "No supervisor assigned"
+ * }
+ * ```
+ */
+export async function getSupervisorForPso(
+  identifier: string
+): Promise<GetSupervisorResponse> {
+  const url = `/api/GetSupervisorForPso?identifier=${encodeURIComponent(
+    identifier
+  )}`;
+  const res = await apiClient.get<GetSupervisorResponse>(url);
+  return res.data;
+}
+
+
+/**
+ * Transfers all PSOs currently assigned to the logged‑in supervisor
+ * to another supervisor (or unassigns them if `newSupervisorEmail` is `null`).
+ *
+ * Calls POST `/api/TransferPsos` with body `{ newSupervisorEmail }`.
+ *
+ * @param newSupervisorEmail
+ *   The email/UPN of the supervisor who should receive these PSOs,
+ *   or `null` to clear assignment.
+ * @returns Promise resolving to the number of PSOs that were transferred.
+ *
+ * @example
+ * ```ts
+ * // Move all my PSOs to bob@foo.com:
+ * const count = await transferPsos("bob@foo.com");
+ * console.log(`Transferred ${count} PSOs`);
+ *
+ * // Unassign all my PSOs:
+ * const cleared = await transferPsos(null);
+ * console.log(`Cleared ${cleared} PSOs`); 
+ * ```
+ */
+export async function transferPsos(
+  newSupervisorEmail: string | null
+): Promise<number> {
+  const res = await apiClient.post<{ transferredCount: number }>(
+    "/api/TransferPsos",
+    { newSupervisorEmail }
+  );
+  return res.data.transferredCount;
 }

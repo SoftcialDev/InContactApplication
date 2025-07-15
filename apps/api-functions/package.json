@@ -16,7 +16,7 @@
     "@azure/service-bus": "^7.0.0",
     "@azure/web-pubsub": "^1.2.0",
     "@microsoft/microsoft-graph-client": "^3.0.7",
-    "@prisma/client": "^6.10.1",
+    "@prisma/client": "^6.11.1",
     "axios": "^1.0.0",
     "jsonwebtoken": "^8.5.1",
     "jwks-rsa": "^3.2.0",
@@ -31,7 +31,7 @@
     "@types/qs": "^6.14.0",
     "copyfiles": "^2.4.1",
     "cpx": "^1.5.0",
-    "prisma": "^6.10.1",
+    "prisma": "^6.11.1",
     "rimraf": "^3.0.2",
     "typescript": "^5.1.0"
   }
