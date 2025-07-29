@@ -6,8 +6,13 @@ import {
 
 import prisma from "./prismaClienService";
 
+export interface ChatParticipant {
+  userId: string;
+  azureAdObjectId: string;
+}
+
 /**
- * Ensures there is a Teams group chat between exactly two users,
+ * Ensures there is a Teams “group” chat between exactly two users,
  * with the given topic.  Will first look in your own database;
  * if none found, will next search Graph; if still none, will
  * create in Graph and persist in your DB.
@@ -21,12 +26,13 @@ import prisma from "./prismaClienService";
  *       { userId: string; azureAdObjectId: string }   // PSO
  *     ]
  * @param topic
- *   The chat’s title, e.g. "InContactApp – Alice Smith & Bob Jones"
+ *   The chat’s title, e.g. `"InContactApp – Alice Smith & Bob Jones"`.
  * @returns The Teams/Graph chatId.
+ * @throws Error if participants.length !== 2.
  */
 export async function getOrCreateChat(
   userAssertion: string,
-  participants: readonly { userId: string; azureAdObjectId: string }[],
+  participants: readonly ChatParticipant[],
   topic: string
 ): Promise<string> {
   if (participants.length !== 2) {
@@ -35,16 +41,25 @@ export async function getOrCreateChat(
   const [p1, p2] = participants;
 
   // ── 0) DATABASE CHECK ──────────────────────────────────────────────
-  const candidates = await prisma.chat.findMany({
-    where: { topic },
+  // Sort the two userIds so the order doesn’t matter
+  const participantIds = [p1.userId, p2.userId].sort();
+
+  // Look for a chat whose topic matches AND whose members are exactly these two
+  const existingChat = await prisma.chat.findFirst({
+    where: {
+      topic,
+      AND: [
+        { members: { some: { userId: participantIds[0] } } },
+        { members: { some: { userId: participantIds[1] } } },
+        // Ensure no extra members beyond these two
+        { members: { every: { userId: { in: participantIds } } } },
+      ],
+    },
     include: { members: { select: { userId: true } } },
   });
 
-  for (const c of candidates) {
-    const ids = c.members.map(m => m.userId).sort();
-    if (ids[0] === p1.userId && ids[1] === p2.userId) {
-      return c.id;
-    }
+  if (existingChat) {
+    return existingChat.id;
   }
 
   // ── 1) SETUP GRAPH CLIENT VIA OBO ─────────────────────────────────
@@ -62,12 +77,12 @@ export async function getOrCreateChat(
   // ── 2) GRAPH SEARCH ────────────────────────────────────────────────
   const resp: any = await graph
     .api("/me/chats")
-    .filter("chatType eq 'group'")
+    .filter("chatType eq 'group' and topic eq '" + topic.replace(/'/g, "\\'") + "'")
     .expand("members")
     .get();
 
   let graphChat = (resp.value as any[]).find(chat => {
-    const memberIds = chat.members
+    const memberIds = (chat.members as any[])
       .map((m: any) => m.user?.id?.toLowerCase())
       .filter(Boolean)
       .sort();
