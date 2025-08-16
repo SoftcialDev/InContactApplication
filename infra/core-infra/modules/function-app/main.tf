@@ -65,8 +65,15 @@ resource "azurerm_function_app" "function_app" {
     ADMINS_GROUP_ID              = var.admins_group_id
     EMPLOYEES_GROUP_ID          = var.employees_group_id
     SUPERVISORS_GROUP_ID        = var.supervisors_group_id
+    SUPER_ADMINS_GROUP_ID      = var.super_admin_group_id
+    CONTACT_MANAGER_GROUP_ID    = var.contact_manager_group_id
+    RECORDINGS_CONTAINER_NAME    = var.storage_account_recordings_container_name
+    RECORDINGS_CONTAINER_URL     = var.storage_account_recordings_container_url
+    AZURE_STORAGE_ACCOUNT = var.storage_account_name
     FUNCTIONS_EXTENSION_VERSION = "~4"
     WEBSITE_NODE_DEFAULT_VERSION = "~20"
+    AZURE_STORAGE_CONNECTION_STRING = var.storage_account_connection_string
+    SNAPSHOT_CONTAINER_NAME     = var.storage_account_snapshot_container_name
     LIVEKIT_API_KEY        = "@Microsoft.KeyVault(SecretUri=${var.secret_uris["livekit_api_key"]})"
     LIVEKIT_API_SECRET     = "@Microsoft.KeyVault(SecretUri=${var.secret_uris["livekit_api_secret"]})"
     AZURE_CLIENT_SECRET    = "@Microsoft.KeyVault(SecretUri=${var.secret_uris["azure_client_secret"]})"

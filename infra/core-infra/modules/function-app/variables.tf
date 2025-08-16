@@ -13,6 +13,15 @@ variable "location" {
   type        = string
 }
 
+
+variable "storage_account_recordings_container_name" {
+  description = "Name of the Blob container for LiveKit recordings"
+  type        = string
+}
+variable "storage_account_recordings_container_url" {
+  description = "Full URL of the Blob container for LiveKit recordings"
+  type        = string
+}
 variable "commands_subscription_name" {
   description = "Name of the Service Bus subscription for commands topic"
   type        = string
@@ -31,6 +40,9 @@ variable "function_plan_sku_size" {
   default     = "Y1"
 }
 
+variable "storage_account_snapshot_container_name" {
+  type = string
+}
 variable "storage_account_name" {
   description = "Name of an existing Storage Account for the Function App"
   type        = string
@@ -132,7 +144,17 @@ variable "employees_group_id" {
   type        = string
 }
 
+variable "contact_manager_group_id" {
+  description = "Azure AD object ID of the contact manager group"
+  type        = string
+}
+
 variable "supervisors_group_id" {
   description = "Azure AD object ID of the Supervisors group"
+  type        = string
+}
+
+variable "super_admin_group_id" {
+  description = "Azure AD object ID of the Super Admins group"
   type        = string
 }

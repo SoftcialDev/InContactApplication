@@ -146,11 +146,14 @@ module "function_app" {
   storage_account_name           = module.storage.storage_account_name
   storage_account_access_key     = module.storage.storage_account_primary_access_key
   storage_account_connection_string = module.storage.storage_account_primary_connection_string
+  storage_account_snapshot_container_name = module.storage.snapshot_container_name
 
   # Authentication and identity configuration
   aad_app_client_id           = module.aad_spa.api_application_client_id
   azure_tenant_id             = data.azuread_client_config.current.tenant_id
   azure_client_id             = module.aad_spa.api_application_client_id
+  storage_account_recordings_container_name  = module.storage.recordings_container_name
+  storage_account_recordings_container_url   = module.storage.recordings_container_url
 
   # Key Vault integration for secrets
   key_vault_id                = module.keyvault.key_vault_id
@@ -160,6 +163,8 @@ module "function_app" {
   admins_group_id             = module.aad_spa.spa_app_role_admin_id
   employees_group_id          = module.aad_spa.spa_app_role_employee_id
   supervisors_group_id        = module.aad_spa.spa_app_role_supervisor_id
+  contact_manager_group_id    = module.aad_spa.spa_app_role_contact_manager_id
+  super_admin_group_id       = module.aad_spa.spa_app_role_super_admin_id
 
   # External service endpoints and configuration
   livekit_api_url             = var.livekit_url
@@ -221,7 +226,7 @@ resource "azurerm_web_pubsub_hub" "with_handler" {
    ]
 
 }
-
+/*
 # 11. PostgreSQL database module
 module "postgres" {
   source = "./modules/database"
@@ -242,7 +247,7 @@ module "postgres" {
   # Restrict public access to specific IP ranges
   allowed_ips         = var.postgres_allowed_ips
 }
-
+*/
 # 12. Service Bus module
 module "service_bus" {
   source = "./modules/service-bus"
@@ -272,7 +277,7 @@ module "keyvault" {
   service_bus_connection= module.service_bus.connection_string
   webpubsub_key         = module.web_pubsub.primary_key
   key_vault_sku_name = var.key_vault_sku_name 
-  postgres_database_url = module.postgres.database_url
+  postgres_database_url = var.database_url
   webpubsub_connection_string = module.web_pubsub.primary_connection_string
-  depends_on = [ module.aad_spa , module.postgres]
+  depends_on = [ module.aad_spa , /*module.postgres*/]
 }
