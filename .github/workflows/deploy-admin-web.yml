@@ -21,7 +21,6 @@ jobs:
     # Runner OS
     runs-on: ubuntu-latest
 
-    # Environment variables passed to steps (for Vite build)
     env:
       # Azure AD settings for your app at build time (injected by Vite)
       VITE_AZURE_AD_CLIENT_ID:               ${{ secrets.VITE_AZURE_AD_CLIENT_ID }}
