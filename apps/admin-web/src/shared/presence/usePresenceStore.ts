@@ -1,138 +1,235 @@
-import { create } from 'zustand'
-import { fetchPresence } from '../api/presenceApi'
-import { PresenceClient } from '../api/presenceClient'
-import { fetchStreamingSessions } from '../api/streamingStatusClient'
-import { WebPubSubClientService } from '../api/webpubsubClient'
-import { UserStatus } from '../types/UserStatus'
+// shared/presence/usePresenceStore.ts
+import { create } from 'zustand';
+import { fetchPresence } from '../api/presenceApi';
+import { PresenceClient } from '../api/presenceClient';
+import { WebPubSubClientService } from '../api/webpubsubClient';
+import type { UserStatus } from '../types/UserStatus';
 
-
-/**
- * Defines the shape of our presence store:
- * - onlineUsers: users currently online
- * - offlineUsers: users currently offline
- * - streamingMap: map of active streams by email
- * - loading/error flags
- * - actions for REST snapshot and real-time updates
- */
 export interface PresenceState {
-  /** Users detected as online in the last REST snapshot */
-  onlineUsers: UserStatus[]
-  /** Users detected as offline in the last REST snapshot */
-  offlineUsers: UserStatus[]
-  /** Map: email → true if the user has an active stream */
-  streamingMap: Record<string, boolean>
-  /** True while the REST snapshot is being fetched */
-  loading: boolean
-  /** Error message if snapshot fails, otherwise null */
-  error: string | null
+  onlineUsers: UserStatus[];
+  offlineUsers: UserStatus[];
+  loading: boolean;
+  error: string | null;
 
-  /**
-   * Fetches a one-time snapshot of presence and streaming activity via REST.
-   *
-   * Updates `onlineUsers`, `offlineUsers`, and `streamingMap`.
-   *
-   * @returns Promise<void> resolving when the snapshot is complete.
-   */
-  loadSnapshot(): Promise<void>
-
-  /**
-   * Opens a Web PubSub connection for real-time presence.
-   * Marks the user as online via REST and joins the "presence" group.
-   *
-   * @param currentEmail - The logged-in user’s email used for grouping
-   * @returns Promise<void> resolving when connection and subscription are ready.
-   */
-  connectWebSocket(currentEmail: string): Promise<void>
-
-  /**
-   * Closes the Web PubSub connection gracefully.
-   * Marks the user as offline via REST and stops listening for events.
-   *
-   * @returns void
-   */
-  disconnectWebSocket(): void
+  loadSnapshot(): Promise<void>;
+  connectWebSocket(currentEmail: string, currentRole?: string): Promise<void>;
+  disconnectWebSocket(): void;
 }
 
-/**
- * Creates a global presence store using Zustand.
- * Combines:
- *  1) A REST snapshot loader,
- *  2) A real-time WebSocket subscription,
- *  3) State slices for UI consumption.
- */
 export const usePresenceStore = create<PresenceState>((set, get) => {
-  let svc: WebPubSubClientService | null = null
-  const presenceClient = new PresenceClient()
+  let svc: WebPubSubClientService | null = null;
+  let messageHandlerRegistered = false;
+  let isConnecting = false;
+  const presenceClient = new PresenceClient();
+
+  /**
+   * Handles supervisor change notifications from WebSocket
+   * @param msg - The supervisor change notification message
+   */
+  const handleSupervisorChangeNotification = (msg: any) => {
+    const { data } = msg;
+    if (!data) return;
+
+    const { psoEmails, oldSupervisorEmail, newSupervisorEmail, newSupervisorId, psoNames, newSupervisorName } = data;
+    
+    // Get current user info from localStorage or context
+    const currentEmail = localStorage.getItem('currentEmail') || '';
+    const currentRole = localStorage.getItem('userRole') || '';
+    
+    // Determine if this user should refresh their data
+    // Always refresh for Admin/SuperAdmin, and for any Supervisor (they need to see updated PSO assignments)
+    const shouldRefresh = 
+      currentRole === 'Admin' || 
+      currentRole === 'SuperAdmin' ||
+      currentRole === 'Supervisor' ||
+      currentEmail === oldSupervisorEmail ||
+      currentEmail === newSupervisorEmail;
+      
+    if (shouldRefresh) {
+      // Update supervisor information in the presence store
+      set((state) => {
+        const updatedOnlineUsers = state.onlineUsers.map(user => {
+          // Update PSOs that were transferred
+          if (psoEmails.includes(user.email)) {
+            return {
+              ...user,
+              supervisorEmail: newSupervisorEmail,
+              supervisorId: newSupervisorId,
+              supervisorName: newSupervisorName
+            };
+          }
+          return user;
+        });
+
+        const updatedOfflineUsers = state.offlineUsers.map(user => {
+          // Update PSOs that were transferred
+          if (psoEmails.includes(user.email)) {
+            return {
+              ...user,
+              supervisorEmail: newSupervisorEmail,
+              supervisorId: newSupervisorId,
+              supervisorName: newSupervisorName
+            };
+          }
+          return user;
+        });
+
+        return {
+          onlineUsers: updatedOnlineUsers,
+          offlineUsers: updatedOfflineUsers
+        };
+      });
+
+      // Trigger a custom event that components can listen to
+      const event = new CustomEvent('supervisorChange', {
+        detail: {
+          psoEmails,
+          oldSupervisorEmail,
+          newSupervisorEmail,
+          newSupervisorId,
+          psoNames,
+          newSupervisorName
+        }
+      });
+      
+    window.dispatchEvent(event);
+      
+ }
+  };
 
   return {
     onlineUsers: [],
     offlineUsers: [],
-    streamingMap: {},
     loading: false,
     error: null,
 
+    // REST snapshot (presence only)
     loadSnapshot: async (): Promise<void> => {
-      set({ loading: true, error: null })
+      set({ loading: true, error: null });
       try {
-        const { online = [], offline = [] } = await fetchPresence()
-        const sessions = await fetchStreamingSessions()
-        const map: Record<string, boolean> = {}
-        ;(sessions as { email: string }[]).forEach(s => {
-          map[s.email] = true
-        })
-
+        const { online = [], offline = [] } = await fetchPresence();
         set({
           onlineUsers: online,
           offlineUsers: offline,
-          streamingMap: map
-        })
+        });
       } catch (err: any) {
-        console.error('Presence snapshot failed:', err)
         set({
-          error: err.message ?? 'Unable to load presence',
+          error: err?.message ?? 'Unable to load presence',
           onlineUsers: [],
           offlineUsers: [],
-          streamingMap: {}
-        })
+        });
       } finally {
-        set({ loading: false })
+        set({ loading: false });
       }
     },
 
-    connectWebSocket: async (currentEmail: string): Promise<void> => {
-      svc = new WebPubSubClientService()
-      await svc.connect(currentEmail)
-      await svc.joinGroup('presence')
-      await presenceClient.setOnline()
+    // Real-time presence via Web PubSub
+    connectWebSocket: async (currentEmail: string, currentRole?: string): Promise<void> => {
+      // Prevent duplicate connections
+      if (isConnecting) {
+    return;
+      }
 
-      svc.onMessage<any>(msg => {
-        if (msg.type !== 'presence') return
-        const u = msg.user as UserStatus
+      if (svc && svc.isConnected && svc.isConnected()) {
 
-        set((state: PresenceState) => {
-          const onlineUsers = u.status === 'online'
-            ? state.onlineUsers.some(x => x.email === u.email)
+        return;
+      }
+
+      try {
+        isConnecting = true;
+        
+        // Save user info to localStorage for supervisor change notifications
+        if (currentEmail) {
+          localStorage.setItem('currentEmail', currentEmail);
+        }
+        if (currentRole) {
+          localStorage.setItem('userRole', currentRole);
+        }
+        
+
+        svc = WebPubSubClientService.getInstance();
+        
+        if (!svc) {
+          return;
+        }
+
+  
+
+        // Ensure a clean socket before connecting
+        await svc.forceCleanup().catch(() => {});
+        
+        // Set up message handler BEFORE connecting (only once)
+        if (!messageHandlerRegistered) {
+          svc.onMessage<any>((msg) => {
+            // Handle supervisor change notifications
+            if (msg?.type === 'supervisor_change_notification') {
+              handleSupervisorChangeNotification(msg);
+              return;
+            }
+          
+          // Handle presence messages
+          if (msg?.type !== 'presence' || !msg?.user) {
+            return;
+          }
+          
+          const u = msg.user as UserStatus;
+          const isOnline = u.status === 'online';
+
+        set((state) => {
+          const wasOnline = state.onlineUsers.some((x) => x.email === u.email);
+          const wasOffline = state.offlineUsers.some((x) => x.email === u.email);
+
+          // No change → skip set()
+          if ((isOnline && wasOnline) || (!isOnline && wasOffline)) {
+            return state;
+          }
+
+          const onlineUsers = isOnline
+            ? wasOnline
               ? state.onlineUsers
               : [...state.onlineUsers, u]
-            : state.onlineUsers.filter(x => x.email !== u.email)
+            : state.onlineUsers.filter((x) => x.email !== u.email);
 
-          const offlineUsers = u.status === 'offline'
-            ? state.offlineUsers.some(x => x.email === u.email)
+          const offlineUsers = !isOnline
+            ? wasOffline
               ? state.offlineUsers
               : [...state.offlineUsers, u]
-            : state.offlineUsers.filter(x => x.email !== u.email)
+            : state.offlineUsers.filter((x) => x.email !== u.email);
 
-          return { onlineUsers, offlineUsers }
-        })
-      })
+          return { onlineUsers, offlineUsers };
+        });
+      });
+      
+          // Mark handler as registered to prevent duplicates
+          messageHandlerRegistered = true;
+        }
+
+        // Now connect to WebSocket
+        await svc.connect(currentEmail);
+        await svc.joinGroup('presence');
+
+        // Removed connection success log to reduce console spam
+
+        // Mark current user as online (best-effort)
+        await presenceClient.setOnline().catch(() => {});
+
+      } catch (error) {
+        console.error('❌ [usePresenceStore] Failed to connect WebSocket:', error);
+        svc = null;
+      } finally {
+        isConnecting = false;
+      }
     },
 
     disconnectWebSocket: (): void => {
-      presenceClient.setOffline().catch(err => {
-        console.warn('Failed to mark offline:', err)
-      })
-      svc?.disconnect()
-      svc = null
-    }
-  }
-})
+      // Best-effort mark offline & cleanup
+      presenceClient.setOffline().catch(() => {});
+      if (svc) {
+        svc.forceCleanup().catch(() => {});
+      }
+      svc = null;
+      isConnecting = false;
+      messageHandlerRegistered = false;
+    },
+  };
+});

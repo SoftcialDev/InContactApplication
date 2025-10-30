@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState } from 'react'
+import React, { useRef, useEffect, useState, memo } from 'react'
 import {
   Room,
   RoomEvent,
@@ -8,12 +8,16 @@ import {
   RemoteAudioTrack,
 } from 'livekit-client'
 import { useSnapshot } from '../hooks/useSnapshot'
-import { usePresenceStore } from '@/shared/presence/usePresenceStore'
-import UserIndicator from '@/shared/ui/UserIndicator'
+import { useAuth } from '@/shared/auth/useAuth'
+import { useUserInfo } from '@/shared/hooks/useUserInfo'
 import { VideoCardProps } from '@/shared/types/VideoCardProps'
 import AddModal from '@/shared/ui/ModalComponent'
 import { useRecording } from '../hooks/useRecording'
 import { useTalkback } from '../hooks/useTalkback'
+import StopReasonButton, { StopReason } from '@/shared/ui/Buttons/StopReasonButton'
+import SupervisorSelector from './SupervisorSelector'
+import { useSynchronizedTimer } from '../hooks/useSynchronizedTimer'
+import { TimerDisplay, CompactTimer } from './TimerDisplay'
 
 /**
  * VideoCard
@@ -34,12 +38,24 @@ import { useTalkback } from '../hooks/useTalkback'
  *   - **Talk** is disabled when there is no active video (not in Play) or while connecting.
  *   - **Start Rec** is also disabled (greyed out) when there is no active video or while connecting.
  */
-const VideoCard: React.FC<VideoCardProps & { livekitUrl?: string }> = ({
+const VideoCard: React.FC<VideoCardProps & { 
+  livekitUrl?: string;
+  psoName?: string;
+  supervisorEmail?: string;
+  supervisorName?: string;
+  onSupervisorChange?: (psoEmail: string, newSupervisorEmail: string) => void;
+  portalMinWidthPx?: number;
+  // Timer props
+  stopReason?: string | null;
+  stoppedAt?: string | null;
+}> = memo(({
   name,
   email,
   onPlay,
   onChat,
   showHeader = true,
+  stopReason,
+  stoppedAt,
   className = '',
   accessToken,
   roomName,
@@ -48,12 +64,33 @@ const VideoCard: React.FC<VideoCardProps & { livekitUrl?: string }> = ({
   shouldStream = false,
   connecting = false,
   onToggle,
+  statusMessage,
+  psoName,
+  supervisorEmail,
+  supervisorName,
+  onSupervisorChange,
+  portalMinWidthPx,
 }) => {
+  // ✅ DETECTAR PANTALLA NEGRA
+  const isBlackScreen = !shouldStream || connecting || !accessToken || !roomName || !livekitUrl;
+  
+  // ✅ Obtener información de autenticación para autorización
+  const { account } = useAuth();
+  
+  // ✅ Obtener información de usuario desde localStorage
+  const { userInfo } = useUserInfo();
+  
+  // ✅ Verificar si el usuario es Admin o SuperAdmin desde userInfo
+  const isAdminOrSuperAdmin = userInfo?.role === 'Admin' || userInfo?.role === 'SuperAdmin';
+  
+  // ✅ Verificar si el usuario es específicamente SuperAdmin desde userInfo
+  const isSuperAdmin = userInfo?.role === 'SuperAdmin';
   const roomRef  = useRef<Room | null>(null)
   const audioRef = useRef<HTMLAudioElement>(null)
 
   /** Local playback mute toggle for the remote audio. */
   const [isAudioMuted, setIsAudioMuted] = useState(true)
+
 
   /**
    * Per-card recording controller.
@@ -76,6 +113,11 @@ const VideoCard: React.FC<VideoCardProps & { livekitUrl?: string }> = ({
     start: startTalk,
     stop: stopTalk,
   } = useTalkback({ roomRef, targetIdentity: roomName })
+
+  /**
+   * Synchronized timer for break/lunch/emergency
+   */
+  const timerInfo = useSynchronizedTimer(stopReason, stoppedAt);
 
   /** Reflect mute state in the hidden <audio> element. */
   useEffect(() => {
@@ -105,7 +147,9 @@ const VideoCard: React.FC<VideoCardProps & { livekitUrl?: string }> = ({
    * - Cleans up on unmount or when streaming stops.
    */
   useEffect(() => {
+    
     if (!shouldStream) {
+
       roomRef.current?.disconnect()
       roomRef.current = null
       return
@@ -140,14 +184,33 @@ const VideoCard: React.FC<VideoCardProps & { livekitUrl?: string }> = ({
       p.on(ParticipantEvent.TrackSubscribed, attachTrack)
     }
 
-    const connectAndWatch = async () => {
+    const connectAndWatch = async (retryCount = 0) => {
       const room = new Room()
       try {
+
+        
         await room.connect(livekitUrl!, accessToken!)
-      } catch {
+
+        
+        // ✅ VERIFICAR PARTICIPANTES DESPUÉS DE CONECTAR
+
+
+        
+      } catch (error) {
+
+        
+        // ✅ REINTENTOS - Si falla la conexión, reintentar hasta 3 veces
+        if (retryCount < 2 && !canceled) {
+          const delay = (retryCount + 1) * 1500; // 1.5s, 3s, 4.5s
+
+          setTimeout(() => connectAndWatch(retryCount + 1), delay);
+          return;
+        }
+        
         // Parent can reflect "connecting" externally; ignore here.
       }
       if (canceled) {
+
         room.disconnect()
         return
       }
@@ -155,15 +218,39 @@ const VideoCard: React.FC<VideoCardProps & { livekitUrl?: string }> = ({
       roomRef.current = room
 
       // Attach to any existing remote participant
+
+
+      
       room.remoteParticipants.forEach(p => {
+
+
+        
         if (p.identity === roomName) {
+
           setupParticipant(p)
         }
       })
-      // Listen for new participants joining
+      
+      // ✅ VERIFICAR SI NO HAY PARTICIPANTES
+      if (room.remoteParticipants.size === 0) {
+
+      }
+      
+      // ✅ LISTENER MEJORADO - También escuchar cuando el participante publica tracks
       room.on(RoomEvent.ParticipantConnected, p => {
+
         if (p.identity === roomName) {
+
           setupParticipant(p)
+        }
+      })
+      
+      // ✅ ESCUCHAR CUANDO SE PUBLICAN TRACKS - Por si el participante ya estaba pero no tenía tracks
+      room.on(RoomEvent.TrackPublished, (publication, participant) => {
+
+        if (participant.identity === roomName) {
+
+          setupParticipant(participant)
         }
       })
     }
@@ -171,6 +258,7 @@ const VideoCard: React.FC<VideoCardProps & { livekitUrl?: string }> = ({
     void connectAndWatch()
 
     return () => {
+
       canceled = true
       lkRoom?.disconnect()
       roomRef.current = null
@@ -221,25 +309,38 @@ const VideoCard: React.FC<VideoCardProps & { livekitUrl?: string }> = ({
   const talkDisabled   = !mediaReady || talkLoading
   const recordDisabled = !mediaReady || recordingLoading  // <- greyed out if no video or connecting
 
+  /**
+   * Handles stop reason selection
+   */
+  const handleStopReasonSelect = (reason: StopReason) => {
+    console.log('[VideoCard] handleStopReasonSelect called with reason:', reason);
+    console.log('[VideoCard] Calling onToggle with email:', email, 'reason:', reason);
+    // Call the original onToggle with the reason
+    onToggle?.(email, reason);
+    console.log(`Stopping with reason: ${reason}`);
+  };
+
   return (
     <>
-      <div className={`flex flex-col bg-[var(--color-primary-dark)] rounded-xl overflow-hidden ${className}`}>
+      <div className={`flex flex-col bg-[var(--color-primary-dark)] rounded-xl overflow-visible ${className}`}>
         {showHeader && (
-          <div className="flex items-center px-2 py-1">
-            <UserIndicator
-              user={{
-                email,
-                name,
-                fullName: name,
-                status: isPlayDisabled ? 'online' : 'offline',
-                azureAdObjectId: roomName ?? null,
-              }}
-              outerClass="w-5 h-5"
-              innerClass="w-4 h-4"
-              bgClass="bg-[var(--color-secondary)]"
-              borderClass="border-2 border-[var(--color-primary-dark)]"
-              nameClass="text-white truncate"
-            />
+          <div className="flex items-center px-2 py-1 relative z-50">
+            {psoName && onSupervisorChange ? (
+              <SupervisorSelector
+                psoName={psoName}
+                currentSupervisorEmail={supervisorEmail || ''}
+                currentSupervisorName={supervisorName || ''}
+                psoEmail={email}
+                onSupervisorChange={onSupervisorChange}
+                disabled={disableControls}
+                className="w-full"
+                portalMinWidthPx={portalMinWidthPx}
+              />
+            ) : (
+              <div className="text-white truncate">{name}</div>
+            )}
+            
+            {/* Timer Display - REMOVED from header */}
           </div>
         )}
 
@@ -255,8 +356,23 @@ const VideoCard: React.FC<VideoCardProps & { livekitUrl?: string }> = ({
               className="absolute inset-0 w-full h-full object-contain"
             />
           ) : (
-            <div className="absolute inset-0 flex items-center justify-center text-white">
-              No Stream
+            <div className="absolute inset-0 flex flex-col items-center justify-center">
+              {(() => {
+                const text = statusMessage || '';
+                return (
+                  <>
+                    <span className="text-xl font-medium text-yellow-400 mb-2">
+                      {text}
+                    </span>
+                    {/* Timer Display in content area - Solo números grandes */}
+                    {timerInfo && (
+                      <div className="mt-2">
+                        <CompactTimer timerInfo={timerInfo} />
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
             </div>
           )}
 
@@ -267,24 +383,29 @@ const VideoCard: React.FC<VideoCardProps & { livekitUrl?: string }> = ({
         {/* Controls */}
         <div className="flex flex-wrap gap-2 mt-2">
           {/* Play / Stop — enforce: stop recording -> stop talk -> toggle */}
-          <button
-            onClick={async () => {
-              if (shouldStream) {
-                if (isRecording && !recordingLoading) {
-                  await toggleRecording()
-                }
-                if (isTalking) {
-                  await stopTalk()
-                }
-              }
-              onToggle?.(email)
-            }}
-            disabled={isPlayDisabled || recordingLoading || talkLoading}
-            className="flex-1 py-2 bg-white text-[var(--color-primary-dark)] rounded-xl disabled:opacity-50"
-            title={shouldStream ? 'Stop stream' : 'Start stream'}
-          >
-            {recordingLoading || talkLoading ? '...' : playLabel}
-          </button>
+          <div className="flex-1 relative">
+            {shouldStream ? (
+              <StopReasonButton
+                onSelect={handleStopReasonSelect}
+                disabled={isPlayDisabled || recordingLoading || talkLoading}
+                className="w-full"
+              >
+                {recordingLoading || talkLoading ? '...' : playLabel}
+              </StopReasonButton>
+            ) : (
+              <button
+                onClick={async () => {
+                  // Start stream normally
+                  onToggle?.(email);
+                }}
+                disabled={isPlayDisabled || recordingLoading || talkLoading}
+                className="w-full py-2 bg-white text-[var(--color-primary-dark)] rounded-xl disabled:opacity-50"
+                title="Start stream"
+              >
+                {recordingLoading || talkLoading ? '...' : playLabel}
+              </button>
+            )}
+          </div>
 
           <button
             onClick={() => onChat(email)}
@@ -300,21 +421,23 @@ const VideoCard: React.FC<VideoCardProps & { livekitUrl?: string }> = ({
             {isAudioMuted ? 'Unmute' : 'Mute'}
           </button> */}
 
-          {/* Talkback 
-          <button
-            onClick={async () => {
-              if (isTalking) {
-                await stopTalk()
-              } else {
-                await startTalk()
-              }
-            }}
-            disabled={talkDisabled}
-            className="flex-1 py-2 rounded-xl bg-indigo-600 text-white disabled:opacity-50"
-            title="Publish your microphone to this user"
-          >
-            {talkLoading ? '...' : talkLabel}
-          </button>*/}
+          {/* Talkback - Solo visible para SuperAdmin y Admin */}
+          {isAdminOrSuperAdmin && (
+            <button
+              onClick={async () => {
+                if (isTalking) {
+                  await stopTalk()
+                } else {
+                  await startTalk()
+                }
+              }}
+              disabled={talkDisabled}
+              className="flex-1 py-2 rounded-xl bg-indigo-600 text-white disabled:opacity-50"
+              title="Publish your microphone to this user"
+            >
+              {talkLoading ? '...' : talkLabel}
+            </button>
+          )}
 
           <button
             onClick={openModal}
@@ -323,15 +446,17 @@ const VideoCard: React.FC<VideoCardProps & { livekitUrl?: string }> = ({
             Snapshot
           </button>
 
-          {/* Recording — greyed out if no active video or while connecting
-          <button
-            onClick={toggleRecording}
-            disabled={recordDisabled}
-            className={`flex-1 py-2 rounded-xl ${isRecording ? 'bg-red-500 text-white' : 'bg-[#BBA6CF] text-white'} disabled:opacity-50`}
-            title={!mediaReady ? 'Recording is available only while streaming' : undefined}
-          >
-            {recordingLoading ? '...' : isRecording ? 'Stop' : 'Record'}
-          </button> */}
+          {/* Recording — TEMPORALMENTE COMENTADO - Solo visible para SuperAdmin, greyed out if no active video or while connecting */}
+          {/* {isSuperAdmin && (
+            <button
+              onClick={toggleRecording}
+              disabled={recordDisabled}
+              className={`flex-1 py-2 rounded-xl ${isRecording ? 'bg-red-500 text-white' : 'bg-[#BBA6CF] text-white'} disabled:opacity-50`}
+              title={!mediaReady ? 'Recording is available only while streaming' : undefined}
+            >
+              {recordingLoading ? '...' : isRecording ? 'Stop Rec' : 'Start Rec'}
+            </button>
+          )} */}
         </div>
       </div>
 
@@ -363,8 +488,20 @@ const VideoCard: React.FC<VideoCardProps & { livekitUrl?: string }> = ({
           />
         </div>
       </AddModal>
+
     </>
   )
-}
+}, (prevProps, nextProps) => {
+  // Solo comparar props críticas para el streaming
+  const criticalProps = ['email', 'accessToken', 'roomName', 'livekitUrl', 'shouldStream', 'connecting', 'statusMessage'];
+  
+  for (const prop of criticalProps) {
+    if (prevProps[prop as keyof typeof prevProps] !== nextProps[prop as keyof typeof nextProps]) {
+      return false; // Props changed, should re-render
+    }
+  }
+  
+  return true; // Props are the same, skip re-render
+})
 
 export default VideoCard

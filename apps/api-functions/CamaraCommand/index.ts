@@ -1,19 +1,24 @@
-﻿// src/functions/CamaraCommand/index.ts
+﻿/**
+ * @fileoverview CamaraCommand - Azure Function for camera command handling
+ * @description Allows authorized users to send START/STOP commands to employees
+ */
+
 import { Context } from "@azure/functions";
-import { z } from "zod";
-import prisma from "../shared/services/prismaClienService";
 import { withAuth } from "../shared/middleware/auth";
 import { withErrorHandler } from "../shared/middleware/errorHandler";
 import { withBodyValidation } from "../shared/middleware/validate";
-import { ok, badRequest, unauthorized } from "../shared/utils/response";
-import { sendAdminCommand } from "../shared/services/busService";
-import { sendToGroup } from "../shared/services/webPubSubService";
-import type { JwtPayload } from "jsonwebtoken";
-
-const schema = z.object({
-  command: z.enum(["START", "STOP"]),
-  employeeEmail: z.string().email()
-});
+import { ok, unauthorized } from "../shared/utils/response";
+import { CommandApplicationService } from "../shared/application/services/CommandApplicationService";
+import { Command } from "../shared/domain/value-objects/Command";
+import { MessagingChannel } from "../shared/domain/enums/MessagingChannel";
+import { commandRequestSchema } from "../shared/domain/schemas/CommandRequestSchema";
+import { serviceContainer } from "../shared/infrastructure/container/ServiceContainer";
+import { IUserRepository } from "../shared/domain/interfaces/IUserRepository";
+import { IAuthorizationService } from "../shared/domain/interfaces/IAuthorizationService";
+import { ICommandMessagingService } from "../shared/domain/interfaces/ICommandMessagingService";
+import { IWebPubSubService } from "../shared/domain/interfaces/IWebPubSubService";
+import { getCallerAdId } from "../shared/utils/authHelpers";
+import { handleAnyError } from "../shared/utils/errorHandler";
 
 /**
  * Azure Function: CamaraCommand
@@ -41,65 +46,54 @@ const schema = z.object({
  */
 export default withErrorHandler(async (ctx: Context) => {
   await withAuth(ctx, async () => {
-    const claims = ctx.bindings.user as JwtPayload;
-    const callerAdId = (claims.oid ?? claims.sub) as string | undefined;
-    if (!callerAdId) {
-      return unauthorized(ctx, "Cannot determine caller identity");
-    }
+    // Initialize service container
+    serviceContainer.initialize();
 
-    // 1️⃣ Load caller record
-    const caller = await prisma.user.findUnique({
-      where: { azureAdObjectId: callerAdId }
-    });
-    if (!caller || caller.deletedAt) {
-      return unauthorized(ctx, "Caller not found or deleted");
-    }
-    if (caller.role !== "Admin" && caller.role !== "Supervisor" && caller.role !== "SuperAdmin") {
-      return unauthorized(ctx, "Insufficient privileges");
-    }
+    // Resolve dependencies from container
+    const userRepository = serviceContainer.resolve<IUserRepository>('UserRepository');
+    const authorizationService = serviceContainer.resolve<IAuthorizationService>('AuthorizationService');
+    const commandMessagingService = serviceContainer.resolve<ICommandMessagingService>('CommandMessagingService');
+    const webPubSubService = serviceContainer.resolve<IWebPubSubService>('WebPubSubService');
+    const commandApplicationService = new CommandApplicationService(
+      userRepository,
+      authorizationService,
+      commandMessagingService,
+      webPubSubService
+    );
 
-    // 2️⃣ Validate request body
-    await withBodyValidation(schema)(ctx, async () => {
-      const { command, employeeEmail } = ctx.bindings.validatedBody as {
-        command: "START" | "STOP";
-        employeeEmail: string;
-      };
+    // Validate request body
+    await withBodyValidation(commandRequestSchema)(ctx, async () => {
+      const { command: commandType, employeeEmail, reason } = ctx.bindings.validatedBody;
+      const claims = ctx.bindings.user;
+      const callerId = getCallerAdId(claims);
 
-      // 3️⃣ Verify target user
-      const target = await prisma.user.findUnique({
-        where: { email: employeeEmail.toLowerCase() }
-      });
-      if (!target || target.deletedAt || target.role !== "Employee") {
-        return badRequest(ctx, "Target user not found or not an Employee");
+      if (!callerId) {
+        return unauthorized(ctx, "Cannot determine caller identity");
       }
 
-      const timestamp = new Date().toISOString();
-
-      // 4️⃣ Immediate Web PubSub broadcast (best-effort)
       try {
-        await sendToGroup(
-          employeeEmail.toLowerCase(),
-          { command, employeeEmail, timestamp }
-        );
-        // 5️⃣ Respond to client indicating WS delivery
-        return ok(ctx, {
-          message: `Command "${command}" sent to ${employeeEmail} via WebSocket`,
-          sentVia: "ws"
-        });
-      } catch (wsErr) {
-        ctx.log.warn("Immediate WS send failed, will fallback to queue:", wsErr);
-      }
+        // Authorize caller
+        await commandApplicationService.authorizeCommandSender(callerId);
 
-      // 6️⃣ Fallback: enqueue in Service Bus
-      try {
-        await sendAdminCommand(command, employeeEmail);
+        // Validate target employee
+        await commandApplicationService.validateTargetEmployee(employeeEmail);
+
+        // Create and send command
+        const command = Command.fromRequest({ command: commandType, employeeEmail, reason });
+        const result = await commandApplicationService.sendCameraCommand(command);
+
+        const channelName = result.sentVia === MessagingChannel.WebSocket ? "WebSocket" : "Service Bus";
         return ok(ctx, {
-          message: `Command "${command}" sent to ${employeeEmail} via Service Bus`,
-          sentVia: "bus"
+          message: `Command "${commandType}" sent to ${employeeEmail} via ${channelName}`,
+          sentVia: result.sentVia
         });
-      } catch (busErr: any) {
-        ctx.log.error("Failed to enqueue command:", busErr);
-        return badRequest(ctx, "Unable to publish command");
+
+      } catch (error) {
+        return handleAnyError(ctx, error, {
+          callerId,
+          employeeEmail,
+          command: commandType
+        });
       }
     });
   });

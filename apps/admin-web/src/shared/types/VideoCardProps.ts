@@ -11,6 +11,7 @@ export interface VideoCardProps {
   roomName?: string;
   shouldStream?: boolean;
   connecting?: boolean;
-  onToggle?: (email: string) => void;
-  disableControls?: boolean
+  onToggle?: (email: string, reason?: string) => void;
+  disableControls?: boolean;
+  statusMessage?: string;
 }

@@ -1,4 +1,5 @@
 import { useAuth } from "@/shared/auth/useAuth";
+import { useUserInfo } from "@/shared/hooks/useUserInfo";
 import { usePresenceStore } from "@/shared/presence/usePresenceStore";
 import React, { useEffect, useState } from "react";
 import { Outlet } from "react-router-dom";
@@ -24,7 +25,9 @@ interface LayoutProps {}
  */
 const Layout: React.FC<LayoutProps> = (): JSX.Element => {
   const { account } = useAuth();
+  const { userInfo } = useUserInfo();
   const currentEmail = account?.username ?? "";
+  const currentRole = userInfo?.role;
 
   /** Whether the sidebar is collapsed. */
   const [isCollapsed, setIsCollapsed] = useState<boolean>(false);
@@ -51,11 +54,11 @@ const Layout: React.FC<LayoutProps> = (): JSX.Element => {
   useEffect(() => {
     if (!currentEmail) return;
     loadSnapshot();
-    connectWebSocket(currentEmail);
+    connectWebSocket(currentEmail, currentRole);
     return () => {
       disconnectWebSocket();
     };
-  }, [currentEmail, loadSnapshot, connectWebSocket, disconnectWebSocket]);
+  }, [currentEmail, currentRole, loadSnapshot, connectWebSocket, disconnectWebSocket]);
 
   return (
     <HeaderProvider>
@@ -81,17 +84,10 @@ const Layout: React.FC<LayoutProps> = (): JSX.Element => {
         <div className="relative flex flex-col min-h-0">
           <Header />
 
-          {/*
-            Sidebar toggle sits *outside* the sidebar, in the content column.
-            It uses -translate-x-full so only its right half peeks in when collapsed,
-            and it remains clickable at all times.
-          */}
-          <div
-            className="
-              absolute left-0 top-1/2 z-20
-              transform  -translate-y-1/2
-            "
-          >
+          {/* Sidebar toggle button - positioned at the edge */}
+          <div className={`fixed top-1/2 z-20 transform -translate-y-1/2 transition-all duration-300 ${
+            isCollapsed ? "left-0" : "left-[350px]"
+          }`}>
             <SidebarToggle
               isCollapsed={isCollapsed}
               onToggle={() => setIsCollapsed(c => !c)}

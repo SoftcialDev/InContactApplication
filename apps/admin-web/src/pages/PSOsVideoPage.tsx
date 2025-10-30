@@ -1,25 +1,61 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import monitorIcon from '@/shared/assets/monitor-icon.png';
-import type { UserStatus } from '@/shared/types/UserStatus';
 import { useHeader } from '@/app/providers/HeaderContext';
 import { useAuth } from '@/shared/auth/useAuth';
+import { useUserInfo } from '@/shared/hooks/useUserInfo';
 import { usePresenceStore } from '@/shared/presence/usePresenceStore';
-import { PSOWithStatus } from '@/shared/types/PsosWithStatus';
 import { Dropdown } from '@/shared/ui/Dropdown';
 import Loading from '@/shared/ui/Loading';
 import { SearchableDropdown } from '@/shared/ui/SearchableDropdown';
-import VideoCard from './Video/components/VideoCard';
-import { useMultiUserStreams } from './Video/hooks/useMultiUserStreams';
-import { useMyPsos } from './Video/hooks/useMyPsos';
+import SimpleVideoCard from './Video/components/SimpleVideoCard';
+import { useIsolatedStreams } from './Video/hooks/useIsolatedStreams';
 import { useVideoActions } from './Video/hooks/UseVideoAction';
+import { useStablePSOs } from './Video/hooks/useStablePSOs';
+import { useSupervisorChangeNotifications } from '@/shared/hooks/useSupervisorChangeNotifications';
 
+/**
+ * Gets user-friendly status message for streaming status
+ * @param status - The streaming status from batch API
+ * @param stopReason - The specific stop reason if available
+ * @returns User-friendly status message
+ */
+function getStatusMessage(status: 'on_break' | 'disconnected' | 'offline', stopReason?: string | null): string {
+  // If we have a specific stop reason, show a more detailed message
+  if (stopReason) {
+    switch (stopReason) {
+      case 'QUICK_BREAK':
+        return 'Quick Break (5 min)';
+      case 'SHORT_BREAK':
+        return 'Short Break (15 min)';
+      case 'LUNCH_BREAK':
+        return 'Lunch Break (30 min)';
+      case 'EMERGENCY':
+        return 'Emergency';
+      case 'END_OF_SHIFT':
+        return 'End of Shift';
+      case 'COMMAND':
+        return 'On Break';
+      case 'DISCONNECT':
+        return 'Disconnected';
+      default:
+        break; // Fall through to generic status
+    }
+  }
+  
+  // Fallback to generic status messages
+  switch (status) {
+    case 'on_break':
+      return 'On Break';
+    case 'disconnected':
+      return 'Disconnected';
+    case 'offline':
+      return 'Offline';
+    default:
+      return '';
+  }
+}
 
 const LAYOUT_OPTIONS = [1,2,3,4,5,6,9,12,20,200] as const;
-
-
-/* ------------------------------------------------------------------ */
-/* LocalStorage helpers: persist dropdown selection + layout          */
-/* ------------------------------------------------------------------ */
 
   
 const LS_PREFIX = 'psoDash';
@@ -61,70 +97,66 @@ const PSOsPage: React.FC = () => {
   useHeader({ title: 'PSOs', iconSrc: monitorIcon, iconAlt: 'PSOs' });
 
   const { account } = useAuth();
+  const { userInfo, loadUserInfo } = useUserInfo();
   const viewerEmail = account?.username?.toLowerCase() ?? '';
-
-  /* ------------------------------------------------------------------ */
-  /* 1️⃣ Authorized PSO metadata (email + supervisorName)                 */
-  /* ------------------------------------------------------------------ */
-  const {
-    psos: myPsoMeta, // [{ email, supervisorName }, ...]
-    loading: psosLoading,
-    error: psosError,
-    refetch: refetchPsos,
-  } = useMyPsos();
-
-  /* Refetch when viewer changes */
+  const viewerId = account?.localAccountId; // Use localAccountId as viewerId
+  const viewerRole = userInfo?.role;
+  const viewerAzureAdObjectId = userInfo?.azureAdObjectId;
+  
+  // Force reload userInfo if role is wrong
   useEffect(() => {
-    refetchPsos();
-  }, [viewerEmail, refetchPsos]);
+    if (account && (!userInfo || userInfo.role === 'Employee')) {
+      console.log('🔍 [PSOsVideoPage] Forcing userInfo reload...');
+      // Clear localStorage first to force fresh API call
+      localStorage.removeItem('userInfo');
+      loadUserInfo();
+    }
+  }, [account, userInfo, loadUserInfo]);
+  
+  // Local state to track supervisor changes from WebSocket messages
+  const [supervisorUpdates, setSupervisorUpdates] = useState<Record<string, { email: string; name: string }>>({});
 
-  /* email(lower) -> supervisorName */
-  const supMap = useMemo(
-    () =>
-      new Map(
-        (myPsoMeta ?? [])
-          .filter((p): p is { email: string; supervisorName: string } => !!p?.email)
-          .map(p => [p.email.toLowerCase(), p.supervisorName])
-      ),
-    [myPsoMeta]
-  );
-  const allowedEmails = useMemo(() => new Set(supMap.keys()), [supMap]);
-
-  /* ------------------------------------------------------------------ */
-  /* 2️⃣ Presence snapshot + live updates                                */
-  /* ------------------------------------------------------------------ */
-  const loadSnapshot        = usePresenceStore(s => s.loadSnapshot);
-  const connectWebSocket    = usePresenceStore(s => s.connectWebSocket);
-  const disconnectWebSocket = usePresenceStore(s => s.disconnectWebSocket);
-  const onlineUsers         = usePresenceStore(s => s.onlineUsers);
-  const offlineUsers        = usePresenceStore(s => s.offlineUsers); // loaded but not shown
-  const presenceLoading     = usePresenceStore(s => s.loading);
-  const presenceError       = usePresenceStore(s => s.error);
-
-  useEffect(() => {
-    loadSnapshot();
-    connectWebSocket(viewerEmail);
-    return () => disconnectWebSocket();
-  }, [viewerEmail, loadSnapshot, connectWebSocket, disconnectWebSocket]);
-
-  /* ------------------------------------------------------------------ */
-  /* 3️⃣ Build PSO list from *online* presence, restricted to allowed     */
-  /* ------------------------------------------------------------------ */
-  const allPsos: PSOWithStatus[] = useMemo(() => {
-    const decorate = (u: UserStatus): PSOWithStatus => ({
-      email:    u.email,
-      fullName: u.fullName ?? u.name ?? u.email,
-      name:     u.fullName ?? u.name ?? u.email,
-      status:   (u.status === 'online' ? 'online' : 'offline') as PSOWithStatus['status'],
-      isOnline: u.status === 'online',
-      supervisorName: supMap.get(u.email.toLowerCase()) ?? '—',
+  // Supervisor change notifications
+  const handleSupervisorChange = useCallback((data: any) => {
+    console.log(`🔄 [PSOsVideoPage] Supervisor change received:`, data);
+    // Log the current state for debugging
+    console.log(`🔄 [PSOsVideoPage] Current viewer: ${viewerEmail}, Role: ${viewerRole}`);
+    console.log(`🔄 [PSOsVideoPage] Affected PSOs: ${data.psoNames.join(', ')}`);
+    console.log(`🔄 [PSOsVideoPage] New supervisor: ${data.newSupervisorName}`);
+    
+    // Update local state with supervisor changes from WebSocket message
+    const updates: Record<string, { email: string; name: string }> = {};
+    data.psoEmails.forEach((psoEmail: string, index: number) => {
+      updates[psoEmail] = {
+        email: data.newSupervisorEmail,
+        name: data.newSupervisorName
+      };
     });
+    
+    console.log(`🔄 [PSOsVideoPage] Updating supervisor info:`, updates);
+    console.log(`🔄 [PSOsVideoPage] Current supervisorUpdates before:`, supervisorUpdates);
+    setSupervisorUpdates(prev => {
+      const newState = { ...prev, ...updates };
+      console.log(`🔄 [PSOsVideoPage] New supervisorUpdates after:`, newState);
+      return newState;
+    });
+  }, [viewerEmail, viewerRole]);
 
-    return onlineUsers
-      .filter(u => allowedEmails.has(u.email.toLowerCase()))
-      .map(decorate)
-      .sort((a, b) => Number(b.isOnline) - Number(a.isOnline));
-  }, [onlineUsers, allowedEmails, supMap]);
+  useSupervisorChangeNotifications(handleSupervisorChange, viewerEmail, viewerRole || undefined);
+
+  /* ------------------------------------------------------------------ */
+  /* 2️⃣ Presence data (already initialized by layout)                   */
+  /* ------------------------------------------------------------------ */
+  // ✅ OPTIMIZADO: Selectores específicos que NO causan re-renders globales
+  const onlineUsers = usePresenceStore(useCallback(s => s.onlineUsers, []));
+  const presenceLoading = usePresenceStore(useCallback(s => s.loading, []));
+  const presenceError = usePresenceStore(useCallback(s => s.error, []));
+
+  /* ------------------------------------------------------------------ */
+  /* 3️⃣ Build PSO list - ESTABLE                                         */
+  /* ------------------------------------------------------------------ */
+  // ✅ OPTIMIZADO: Hook estable que NO causa re-renders innecesarios
+  const allPsos = useStablePSOs(viewerEmail, viewerRole || undefined, viewerAzureAdObjectId);
 
   /* ------------------------------------------------------------------ */
   /* 4️⃣ Pinned PSOs (dropdown) — persisted                              */
@@ -150,80 +182,63 @@ useEffect(() => {
   window.localStorage.setItem(lsKey(viewerEmail, 'layout'), String(layout));
 }, [viewerEmail, fixedEmails, layout]);
 
-  /* Prune pinned PSOs that are no longer online (expected behavior) */
-useEffect(() => {
-  // 1) Espera a que la lista de PSOs y la presencia hayan terminado de cargar:
-  if (psosLoading || presenceLoading) return;
-  // 2) Si no hay PSOs online, no toques nada:
-  if (allPsos.length === 0) return;
-
-  const onlineSet = new Set(allPsos.map(p => p.email));
-  setFixedEmails(prev => prev.filter(e => onlineSet.has(e)));
-}, [allPsos, psosLoading, presenceLoading]);
+  /* 
+   * REMOVED: Auto-pruning of offline PSOs from localStorage
+   * 
+   * Previously, this effect would automatically remove PSOs from fixedEmails
+   * when they went offline, which caused issues during temporary disconnections.
+   * 
+   * Now, PSOs remain in localStorage until the user explicitly deselects them,
+   * providing better persistence across temporary network issues.
+   * 
+   * The displayList will still filter out offline PSOs for display purposes,
+   * but the localStorage selection persists.
+   */
 
   /* ------------------------------------------------------------------ */
   /* 6️⃣ LiveKit credentials & handlers                                  */
   /* ------------------------------------------------------------------ */
-  const credsMap = useMultiUserStreams(
-    viewerEmail,
-    fixedEmails.length > 0
-      ? allPsos.filter(p => fixedEmails.includes(p.email)).map(p => p.email.toLowerCase())
-      : allPsos.map(p => p.email.toLowerCase())
-  );
+  const targetEmails = useMemo(() => {
+    // Para todos los roles: mostrar todos los PSOs por defecto
+    return allPsos.map(p => p.email.toLowerCase());
+  }, [allPsos]);
+
+  const rawCredsMap = useIsolatedStreams(viewerEmail, targetEmails);
+  
+  // Usar credsMap directamente sin memoización problemática
+  const credsMap = rawCredsMap;
+  
   const { handlePlay, handleStop, handleChat } = useVideoActions();
+  
+  // ✅ OPTIMIZACIÓN: Ya no necesitamos handlers aquí, el componente optimizado los maneja
 
   /* ------------------------------------------------------------------ */
   /* 7️⃣ Compute display list                                             */
   /* ------------------------------------------------------------------ */
 const displayList = useMemo(() => {
-  // 1️⃣ Selecciona fijos o todos
-  const base = fixedEmails.length > 0
+  // 1️⃣ Filtrar por PSOs seleccionados en el dropdown (si hay selección)
+  const base = fixedEmails.length > 0 
     ? allPsos.filter(p => fixedEmails.includes(p.email))
     : allPsos;
 
-  // 2️⃣ Ordena por quienes tienen token de stream primero
+  // 2️⃣ Ordena por quienes tienen token de stream primero, con sort estable
   const sortedByStreaming = [...base].sort((a, b) => {
     const aLive = Boolean(credsMap[a.email.toLowerCase()]?.accessToken);
     const bLive = Boolean(credsMap[b.email.toLowerCase()]?.accessToken);
-    if (aLive && !bLive) return -1;
-    if (!aLive && bLive) return 1;
-    return 0;
+    if (aLive !== bLive) return aLive ? -1 : 1;
+    return a.email.localeCompare(b.email); // stable tie-breaker
   });
 
   // 3️⃣ Toma solo los primeros `layout`
-  return sortedByStreaming.slice(0, layout);
-}, [allPsos, fixedEmails, layout, credsMap]);
+  const result = sortedByStreaming.slice(0, layout);
+  return result;
+  }, [allPsos, fixedEmails, layout, credsMap]);
 
-  const renderCard = (u: PSOWithStatus) => {
-    const key        = u.email.toLowerCase();
-    const c          = credsMap[key] ?? { loading: false };
-    const isLive     = Boolean(c.accessToken);
-    const connecting = c.loading;
-    return (
-      <VideoCard
-        key={u.email}
-        name={`${u.fullName} — Supervisor: ${u.supervisorName}`}
-        email={u.email}
-        accessToken={c.accessToken}
-        roomName={c.roomName}
-        livekitUrl={c.livekitUrl}
-        shouldStream={isLive}
-        connecting={connecting}
-        disableControls={!u.isOnline || connecting}
-        onToggle={() => isLive ? handleStop(u.email) : handlePlay(u.email)}
-        onPlay={handlePlay}
-        onStop={handleStop}
-        onChat={handleChat}
-        className="w-full h-full"
-      />
-      
-    );
-  };
 
-  if (psosError || presenceError) {
+  if (presenceError) {
     return (
       <div className="p-6 text-red-500">
-        Error: {psosError || presenceError}
+        Error: {presenceError}
       </div>
     );
   }
@@ -241,6 +256,7 @@ const displayList = useMemo(() => {
           selectedValues={fixedEmails}
           onSelectionChange={setFixedEmails}
           placeholder="Choose PSOs to display"
+          showSelectAll={true}
         />
         <Dropdown
           options={LAYOUT_OPTIONS.map(n => ({ label: `Layout ${n} - cams`, value: n }))}
@@ -252,68 +268,122 @@ const displayList = useMemo(() => {
       </div>
 
       {/* Content */}
-      {(psosLoading || presenceLoading) ? (
+      {presenceLoading ? (
         <div className="flex flex-1 items-center justify-center">
           <Loading action="Loading PSOs…" />
         </div>
       ) : displayList.length === 0 ? (
         <div className="flex flex-1 items-center justify-center text-white">
-          No PSOs to display
+          <div className="max-w-2xl text-center px-4">
+            No PSOs to display
+          </div>
         </div>
       ) : (
         <>
-          {displayList.length === 1 && (
-            <div className="flex items-center justify-center p-4">
-              <div className="w-11/12 max-w-5xl">
-                {renderCard(displayList[0])}
-              </div>
-            </div>
-          )}
-          {displayList.length === 2 && (
-            <div
-              className="grid flex-grow gap-4"
-              style={{ gridTemplateColumns: 'repeat(2,1fr)', gridTemplateRows: '1fr' }}
-            >
-              {displayList.map(renderCard)}
-            </div>
-          )}
-          {displayList.length === 3 && (
-            <div className="flex flex-col flex-1 p-2">
-              <div className="flex gap-2">
-                {displayList.slice(0,2).map(renderCard)}
-              </div>
-              <div className="flex justify-center mt-2">
-                <div className="w-1/2">{renderCard(displayList[2])}</div>
-              </div>
-            </div>
-          )}
-          {displayList.length === 4 && (
-            <div
-              className="grid gap-4 justify-center content-center"
-              style={{ gridTemplateColumns:'repeat(2,0.4fr)', gridTemplateRows:'repeat(2,1fr)' }}
-            >
-              {displayList.map(renderCard)}
-            </div>
-          )}
-          {displayList.length >= 5 && (
-            <div
-              className="grid gap-4"
-              style={{ gridTemplateColumns:'repeat(3,1fr)', gridAutoRows:'1fr' }}
-            >
-              {displayList.map((p,i) => {
-                const rows      = Math.ceil(displayList.length/3);
-                const rowIndex  = Math.floor(i/3);
-                const inLastRow = rowIndex===rows-1;
-                const itemsLast = displayList.length - 3*(rows-1);
-                const align     = inLastRow && itemsLast<3 ? 'justify-self-center' : 'justify-self-stretch';
-                return (
-                  <div key={p.email} className={`w-full h-full ${align}`}>
-                    {renderCard(p)}
-                  </div>
-                );
-              })}
-            </div>
-          )}
+          {/* Layout unificado con estructura estable */}
+          <div 
+            className="video-grid-container grid gap-4 flex-grow transition-all duration-300 ease-in-out"
+            style={{
+              gridTemplateColumns: (() => {
+                const cols = displayList.length === 1 ? 1 :
+                  displayList.length === 2 ? 2 :
+                  displayList.length === 3 ? 2 :
+                  displayList.length === 4 ? 2 : 3;
+                return `repeat(${cols}, minmax(0,1fr))`;
+              })(),
+              paddingBottom:'260px' 
+            }}
+          >
+            {displayList.map((p, i) => {
+              // Calcular estilo por card - sin wrappers condicionales
+              const itemStyle: React.CSSProperties = {};
+
+              // 3 items: hacer el último de ancho completo centrado
+              if (displayList.length === 3 && i === 2) {
+                itemStyle.gridColumn = '1 / -1';
+                itemStyle.justifySelf = 'center';
+                itemStyle.maxWidth = '66%';
+                itemStyle.width = '100%';
+              }
+
+              // 1 item: ancho completo pero limitar ancho del card
+              if (displayList.length === 1) {
+                itemStyle.gridColumn = '1 / -1';
+                itemStyle.justifySelf = 'center';
+                itemStyle.maxWidth = '80%';
+                itemStyle.width = '100%';
+              }
+
+              // Centrado de última fila cuando items < cols
+              const cols = displayList.length === 1 ? 1 :
+                displayList.length === 2 ? 2 :
+                displayList.length === 3 ? 2 :
+                displayList.length === 4 ? 2 : 3;
+              const rows = Math.ceil(displayList.length / 3);
+              const rowIndex = Math.floor(i / 3);
+              const inLastRow = rowIndex === rows - 1;
+              const itemsLast = displayList.length - 3 * (rows - 1);
+              const shouldCenter = cols === 3 && inLastRow && itemsLast > 0 && itemsLast < 3;
+              const alignClass = shouldCenter ? 'justify-self-center' : 'justify-self-stretch';
+
+              const key = p.email.toLowerCase();
+              const c = credsMap[key] ?? { loading: false };
+              const isLive: boolean = Boolean(c.accessToken);
+              // Wider dropdown when more than 5 cards are visible
+              const portalMinWidthPx = displayList.length > 5 ? 360 : undefined;
+              // ✅ CONNECTING: Si está cargando O si está online pero no tiene token (acaba de empezar a transmitir)
+              const connecting: boolean = c.loading || (p.isOnline && !c.accessToken && Boolean(c.roomName));
+              
+              // ✅ Batch status (reason when there is no streaming session)
+              const statusInfo = c.statusInfo;
+              const statusMessage = statusInfo ? getStatusMessage(statusInfo.status, statusInfo.lastSession?.stopReason) : null;
+              
+              // ✅ REMOVED: No more loading/updating states to prevent connecting issues
+              // const showLoading = !c.accessToken && !statusInfo && !c.loading;
+              // const showUpdating = !c.accessToken && !statusInfo && p.isOnline;
+              
+
+              
+              // Get updated supervisor info from WebSocket message if available
+              const supervisorUpdate = supervisorUpdates[p.email];
+              const currentSupervisorEmail = supervisorUpdate?.email || p.supervisorEmail;
+              const currentSupervisorName = supervisorUpdate?.name || p.supervisorName;
+              
+              // Debug logging removed to reduce console spam
+              
+              return (
+                <div
+                  key={`${key}-${currentSupervisorEmail}`} // ✅ Include supervisor in key to force re-render
+                  className={`video-card-wrapper w-full h-full relative z-10 ${alignClass}`}
+                  style={itemStyle}
+                >
+                  <SimpleVideoCard
+                    email={p.email}
+                    name={`${p.fullName} — Supervisor: ${currentSupervisorName}`}
+                    accessToken={c.accessToken}
+                    roomName={c.roomName}
+                    livekitUrl={c.livekitUrl}
+                    shouldStream={isLive}
+                    connecting={connecting}
+                    disableControls={!p.isOnline || connecting}
+                    className="w-full h-full"
+                    statusMessage={statusMessage || undefined}
+                    psoName={p.fullName} // PSO name for the selector
+                    supervisorEmail={currentSupervisorEmail} // Updated supervisor email from WebSocket
+                    supervisorName={currentSupervisorName} // Updated supervisor name from WebSocket
+                    onSupervisorChange={(psoEmail, newSupervisorEmail) => {
+                      console.log(`Supervisor changed for ${psoEmail} to ${newSupervisorEmail}`);
+                      // TODO: Handle supervisor change - refresh data or update state
+                    }}
+                    portalMinWidthPx={portalMinWidthPx}
+                    // Timer props
+                    stopReason={statusInfo?.lastSession?.stopReason || null}
+                    stoppedAt={statusInfo?.lastSession?.stoppedAt || null}
+                  />
+                </div>
+              );
+            })}
+          </div>
         </>
       )}
     </div>

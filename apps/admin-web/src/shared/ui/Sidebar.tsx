@@ -5,6 +5,7 @@ import monitorIcon from "@/shared/assets/icon-monitor.png";
 import managementIcon from "@/shared/assets/manage_icon_sidebar.png";
 import { useVideoActions } from "@/pages/Video/hooks/UseVideoAction";
 import { useAuth } from "../auth/useAuth";
+import { useUserInfo } from "../hooks/useUserInfo";
 import { UserStatus } from "../types/UserStatus";
 import { Dropdown } from "./Dropdown";
 import IconWithLabel from "./IconWithLabel";
@@ -15,6 +16,7 @@ import {
   ManagerStatus,
 } from "@/pages/ContactManager/hooks/useContactManagerStatus";
 import { PsoDashboardForm } from '@/pages/PSO/components/PSODashboardForm';
+import SidebarToggle from "./SidebarToggle";
 
 /**
  * SidebarProps
@@ -62,24 +64,19 @@ const Sidebar: React.FC<SidebarProps> = ({
   onToggleCollapse,
 }) => {
   const { account } = useAuth();
+  const { userInfo } = useUserInfo();
   const { handleChat } = useVideoActions();
   const currentEmail = account?.username ?? "";
   const psoEmail   = currentEmail;
   const senderName = account?.name ?? "";
 
-  // Viewer roles
-  const claims = (account?.idTokenClaims ?? {}) as Record<string, any>;
-  const rawRoles = claims.roles ?? claims.role;
-  const roles: string[] = Array.isArray(rawRoles)
-    ? rawRoles
-    : typeof rawRoles === "string"
-    ? [rawRoles]
-    : [];
-  const isAdmin = roles.includes("Admin");
-  const isSupervisor = roles.includes("Supervisor");
-  const isContactManager = roles.includes("ContactManager");
-  const isSuperAdmin = roles.includes("SuperAdmin");
-  const isEmployee = roles.includes("Employee");
+  // Get roles from database via UserInfoContext
+  const userRole = userInfo?.role;
+  const isAdmin = userRole === "Admin";
+  const isSupervisor = userRole === "Supervisor";
+  const isContactManager = userRole === "ContactManager";
+  const isSuperAdmin = userRole === "SuperAdmin";
+  const isEmployee = userRole === "Employee";
 
   /**
    * Contact managers assigned to the current viewer (Employee-only).
@@ -240,9 +237,10 @@ const cmFilterAdornment = useMemo(() => {
       className={
         `relative flex flex-col bg-[var(--color-primary)] text-white ` +
         `border-r border-black transition-all duration-300 ` +
-        (isCollapsed ? "w-f overflow-hidden" : "w-[350px]")
+        (isCollapsed ? "w-0 overflow-hidden" : "w-[350px]")
       }
     >
+
       {/* Logo header */}
       <div className="border-b border-black px-6 py-4">
         <IconWithLabel
@@ -306,7 +304,8 @@ const cmFilterAdornment = useMemo(() => {
                 </NavLink>
               )}
 
-              {isSuperAdmin && (
+              {/* TEMPORALMENTE COMENTADO - Recording Report */}
+              {/* {isSuperAdmin && (
                 <NavLink
                   to="/recordingReport"
                   className={({ isActive }) =>
@@ -315,7 +314,7 @@ const cmFilterAdornment = useMemo(() => {
                 >
                   Recording Report
                 </NavLink>
-              )}
+              )} */}
 
               {(isAdmin || isSuperAdmin) && (
                 <NavLink
@@ -427,82 +426,115 @@ const cmFilterAdornment = useMemo(() => {
             />
           </div>
 
-          {/* User lists */}
+          {/* User lists with dynamic height based on content */}
           {loading ? (
             <div className="flex justify-center py-4">
               <Loading action="Loading presence…" />
             </div>
           ) : (
             <>
-              {/* Online */}
-              <div className="text-xs font-semibold mb-2">Online</div>
-              {filteredOnline.length === 0 ? (
-                <div className="text-xs font-semibold text-[var(--color-tertiary)]">
-                  No users online
-                </div>
-              ) : (
-                filteredOnline.map((u) => {
-                  const supName =
-                    (u as any).supervisorFullName
-                      ? (u as any).supervisorFullName
-                      : (u as any).supervisorName ?? "";
-                  const displayName = supName
-                    ? `${shortName(u)} (${supName})`
-                    : shortName(u);
-                  const cmStatus = cmStatusByEmail.get(u.email.toLowerCase());
+              {/* Online - Dynamic height based on content */}
+              {filteredOnline.length > 0 && (
+                <div className="mb-4">
+                  <div className="text-xs font-semibold mb-2">Online ({filteredOnline.length})</div>
+                  <div 
+                    className="overflow-y-auto online-scroll-container custom-scrollbar"
+                    style={{ 
+                      maxHeight: filteredOnline.length <= 5 ? 'auto' : '128px',
+                      scrollbarWidth: 'thin',
+                      scrollbarColor: 'var(--color-secondary) var(--color-primary)',
+                      msOverflowStyle: 'scrollbar'
+                    }}>
+                    {filteredOnline.map((u) => {
+                      // Don't show supervisor name in parentheses - just show the PSO name
+                      const displayName = shortName(u);
+                      const cmStatus = cmStatusByEmail.get(u.email.toLowerCase());
 
-                  return (
-                    <UserItem
-                      key={u.email}
-                      user={{
-                        ...u,
-                        fullName: displayName,
-                        name: displayName,
-                        cmStatus,
-                      }}
-                      onChat={() => handleChat(u.email)}
-                      disableLink={disableLinkFor(u)}
-                    />
-                  );
-                })
+                      return (
+                        <UserItem
+                          key={u.email}
+                          user={{
+                            ...u,
+                            fullName: displayName,
+                            name: displayName,
+                            cmStatus,
+                          }}
+                          onChat={() => handleChat(u.email)}
+                          disableLink={disableLinkFor(u)}
+                        />
+                      );
+                    })}
+                  </div>
+                </div>
               )}
 
-              {/* Offline */}
-              <div className="text-xs font-semibold mt-4 mb-2">Offline</div>
-              {filteredOffline.length === 0 ? (
-                <div className="text-xs font-semibold text-[var(--color-tertiary)]">
-                  No users offline
-                </div>
-              ) : (
-                filteredOffline.map((u) => {
-                  const supName =
-                    (u as any).supervisorFullName
-                      ? (u as any).supervisorFullName
-                      : (u as any).supervisorName ?? "";
-                  const displayName = supName
-                    ? `${shortName(u)} (${supName})`
-                    : shortName(u);
-                  const cmStatus = cmStatusByEmail.get(u.email.toLowerCase());
+              {/* Offline - Dynamic height based on content */}
+              {filteredOffline.length > 0 && (
+                <div>
+                  <div className="text-xs font-semibold mb-2">Offline ({filteredOffline.length})</div>
+                  <div 
+                    className="overflow-y-auto offline-scroll-container custom-scrollbar"
+                    style={{ 
+                      maxHeight: filteredOffline.length <= 5 ? 'auto' : '128px',
+                      scrollbarWidth: 'thin',
+                      scrollbarColor: 'var(--color-secondary) var(--color-primary)',
+                      msOverflowStyle: 'scrollbar'
+                    }}>
+                    {filteredOffline.map((u) => {
+                      // Don't show supervisor name in parentheses - just show the PSO name
+                      const displayName = shortName(u);
+                      const cmStatus = cmStatusByEmail.get(u.email.toLowerCase());
 
-                  return (
-                    <UserItem
-                      key={u.email}
-                      user={{
-                        ...u,
-                        fullName: displayName,
-                        name: displayName,
-                        cmStatus,
-                      }}
-                      onChat={() => handleChat(u.email)}
-                      disableLink={disableLinkFor(u)}
-                    />
-                  );
-                })
+                      return (
+                        <UserItem
+                          key={u.email}
+                          user={{
+                            ...u,
+                            fullName: displayName,
+                            name: displayName,
+                            cmStatus,
+                          }}
+                          onChat={() => handleChat(u.email)}
+                          disableLink={disableLinkFor(u)}
+                        />
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Show message when no users at all */}
+              {filteredOnline.length === 0 && filteredOffline.length === 0 && (
+                <div className="text-xs font-semibold text-[var(--color-tertiary)] text-center py-4">
+                  No users found
+                </div>
               )}
             </>
           )}
         </div>
       </nav>
+      
+      {/* Custom scrollbar styles */}
+      <style>{`
+        .custom-scrollbar::-webkit-scrollbar {
+          width: 8px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+          background: var(--color-primary);
+          border-radius: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+          background: var(--color-secondary);
+          border-radius: 4px;
+          border: 1px solid var(--color-primary);
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+          background: var(--color-tertiary);
+        }
+        .custom-scrollbar::-webkit-scrollbar-corner {
+          background: var(--color-primary);
+        }
+      `}</style>
     </aside>
   );
 };

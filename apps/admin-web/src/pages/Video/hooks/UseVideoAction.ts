@@ -41,13 +41,13 @@ export function useVideoActions() {
    */
   const handlePlay = useCallback(
     async (email: string): Promise<void> => {
-      console.log('Starting stream for', email);
       try {
         await commandClient.start(email);
-        console.log('START command sent for', email);
         showToast(`Sending start stream command for ${email}`, 'success');
+        
+        
       } catch (err: any) {
-        console.error('Failed to send START command for', email, err);
+
         showToast(`Failed to start stream for ${email}`, 'error');
       }
     },
@@ -57,24 +57,22 @@ export function useVideoActions() {
   /**
    * Send a STOP command to the backend to end streaming for a PSO.
    *
-   * @param email – PSO’s email address.
+   * @param email – PSO's email address.
+   * @param reason – Optional reason for stopping the stream.
    * @returns Promise that resolves once the command is sent.
    * @throws Will `showToast(..., 'error')` on failure.
    *
    * @example
    * ```ts
-   * await handleStop('pso@example.com');
+   * await handleStop('pso@example.com', 'SHORT_BREAK');
    * ```
    */
   const handleStop = useCallback(
-    async (email: string): Promise<void> => {
-      console.log('Stopping stream for', email);
+    async (email: string, reason?: string): Promise<void> => {
       try {
-        await commandClient.stop(email);
-        console.log('STOP command sent for', email);
-        showToast(`Stopped stream for ${email}`, 'success');
+        await commandClient.stop(email, reason);
+        showToast(`Stopped stream for ${email}${reason ? ` (${reason})` : ''}`, 'success');
       } catch (err: any) {
-        console.error('Failed to send STOP command for', email, err);
         showToast(`Failed to stop stream for ${email}`, 'error');
       }
     },
@@ -103,7 +101,7 @@ export function useVideoActions() {
         openChatWindow(chatId);
         showToast(`Opened InContact chat with ${email}`, 'success');
       } catch (err: any) {
-        console.error('Failed to open chat for', email, err);
+
         showToast(`Failed to open InContact chat for ${email}`, 'error');
       }
     },

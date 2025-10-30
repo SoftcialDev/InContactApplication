@@ -40,8 +40,12 @@ export type VoidHandler = () => void;
  * - **Exponential backoff** with jitter for reconnect attempts.
  * - **Online event** handling is installed **once** and removed on `disconnect()`.
  * - **Clean parsing** of text/ArrayBuffer messages and robust error isolation.
+ * - **Connection deduplication**: prevents multiple connections from the same user.
  */
 export class WebPubSubClientService {
+  // === Singleton instance ===
+  private static instance: WebPubSubClientService | null = null;
+  
   // === Connection state ===
   private client?: WebPubSubClient;
   private currentUserEmail: string | null = null;
@@ -51,6 +55,64 @@ export class WebPubSubClientService {
   private connected = false;
   /** True while a connect() is in progress. Used to coalesce concurrent calls. */
   private connecting = false;
+
+  /**
+   * Get the singleton instance of WebPubSubClientService.
+   * This ensures only one connection per application.
+   */
+  static getInstance(): WebPubSubClientService {
+    if (!WebPubSubClientService.instance) {
+      WebPubSubClientService.instance = new WebPubSubClientService();
+    }
+    return WebPubSubClientService.instance;
+  }
+
+  /**
+   * Private constructor to enforce singleton pattern.
+   */
+  private constructor() {
+    // Private constructor to prevent direct instantiation
+  }
+
+  /**
+   * Force cleanup of all existing connections for a user.
+   * This should be called when switching users or when connection leaks are detected.
+   */
+  public async forceCleanup(): Promise<void> {
+
+    
+    if (this.client) {
+      try {
+        // Leave all groups before disconnecting
+        for (const group of this.joinedGroups) {
+          try {
+            await this.client.leaveGroup(group);
+
+          } catch (error) {
+
+          }
+        }
+        
+        // Stop the client
+        this.client.stop();
+
+      } catch (error) {
+
+      }
+    }
+    
+    // Reset all state
+    this.client = undefined;
+    this.connected = false;
+    this.connecting = false;
+    this.connectPromise = null;
+    this.currentUserEmail = null;
+    this.joinedGroups.clear();
+    this.shouldReconnect = false;
+    this.clearReconnectTimer();
+    
+
+  }
   /** Promise shared by concurrent connect() callers (idempotent connect). */
   private connectPromise: Promise<void> | null = null;
 
@@ -93,27 +155,33 @@ export class WebPubSubClientService {
   public async connect(userEmail: string): Promise<void> {
     const email = userEmail.trim().toLowerCase();
 
+    // ✅ VERIFICAR CONEXIÓN EXISTENTE - Evitar múltiples conexiones
+    if (this.connected && this.currentUserEmail === email && this.client) {
+
+      return;
+    }
+
     // Switch user scenario
     if (this.currentUserEmail && this.currentUserEmail !== email) {
+
       this.disconnect();                 // clean state
       this.joinedGroups.clear();         // do not leak previous user's groups
     }
 
     // Idempotent connect coalescing
     if (this.connecting && this.currentUserEmail === email && this.connectPromise) {
+
       return this.connectPromise;
-    }
-    if (this.connected && this.currentUserEmail === email) {
-      // Already connected for this identity
-      return;
     }
 
     this.currentUserEmail = email;
     this.shouldReconnect = true;
 
     // Ensure default groups are always present (they will be joined on 'connected')
+
     this.joinedGroups.add(email);        // "personal group"
     this.joinedGroups.add("presence");
+
 
     this.connecting = true;
     this.connectPromise = (async () => {
@@ -158,6 +226,7 @@ export class WebPubSubClientService {
    * `connect()` again and keep your subscriptions.
    */
   public disconnect(): void {
+
     this.shouldReconnect = false;
     this.clearReconnectTimer();
 
@@ -167,13 +236,20 @@ export class WebPubSubClientService {
     }
 
     if (this.client) {
-      try { this.client.stop(); } catch { /* no-op */ }
-      this.client = undefined;
+      try { 
+        this.client.stop(); 
+
+      } catch (error) { 
+
+      }
+      this.client = undefined; // ✅ Limpiar referencia del cliente
     }
 
     this.connected = false;
     this.connecting = false;
     this.connectPromise = null;
+    this.currentUserEmail = null; // ✅ Limpiar usuario actual
+
   }
 
   /**
@@ -184,9 +260,18 @@ export class WebPubSubClientService {
    */
   public async joinGroup(groupName: string): Promise<void> {
     const g = groupName.trim().toLowerCase();
+
     this.joinedGroups.add(g);
-    if (!this.client) return; // Will be joined after connect
+
+    
+    if (!this.client) {
+
+      return; // Will be joined after connect
+    }
+    
+
     await this.client.joinGroup(g);
+
   }
 
   /**
@@ -278,6 +363,7 @@ export class WebPubSubClientService {
 
     // Lifecycle: connected/disconnected → update flags, backoff, and fan-out
     wsClient.on("connected", async () => {
+
       this.connected = true;
       this.clearReconnectTimer();
       this.resetBackoff();
@@ -288,9 +374,16 @@ export class WebPubSubClientService {
       }
       this.joinedGroups.add("presence");
 
+
       // Re-join **all** remembered groups
       for (const g of this.joinedGroups) {
-        try { await wsClient.joinGroup(g); } catch { /* swallow to avoid loop breaks */ }
+        try { 
+
+          await wsClient.joinGroup(g); 
+
+        } catch (error) { 
+          // Error rejoining group - silently continue
+        }
       }
 
       // Notify external subscribers
@@ -397,4 +490,4 @@ export class WebPubSubClientService {
  * Import and reuse this instance everywhere instead of creating new clients:
  * `import { webPubSubClient as pubsub } from "@/shared/api/webpubsubClient"`
  */
-export const webPubSubClient = new WebPubSubClientService();
+export const webPubSubClient = WebPubSubClientService.getInstance();

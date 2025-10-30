@@ -84,7 +84,6 @@ const AddContactManagerPage: React.FC = () => {
       setProfiles(rows);
     } catch (err: any) {
       console.error('fetchProfiles error:', err);
-      showToast('Failed to load Contact Managers', 'error');
     } finally {
       setLoadingProfiles(false);
     }
@@ -97,7 +96,7 @@ const AddContactManagerPage: React.FC = () => {
   const fetchCandidates = async (): Promise<void> => {
     setLoadingCandidates(true);
     try {
-      const res = await getUsersByRole('Supervisor,Employee,Tenant,Admin', 1, 1000);
+      const res = await getUsersByRole('Supervisor,Employee,Unassigned,Admin', 1, 1000);
       const allUsers: UserByRole[] = Array.isArray(res.users) ? res.users : [];
       const filtered = allUsers.filter(u =>
         u.email.toLowerCase() !== account?.username.toLowerCase()
